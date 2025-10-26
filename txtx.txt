@@ -10,17 +10,11 @@ pw : password
 email joe20@joe.com
 12key : horse dog ice queen orange rabbit banana banana pear apple cat horse
 
-un: joe4
+
+un: joe8
 pw : password 
-email joe4@joe.com
-12key : umbrella kiwi orange banana grape ice nut snake pear xray orange monkey
-
-
-joe 5  - 12-key phrase: kiwi dog whale horse monkey grape banana kiwi umbrella kiwi zebra monkey
-
-fin -  horse rabbit umbrella queen ice tiger ice fox nut nut zebra elephant
-
-horse dog ice queen orange rabbit banana banana pear apple cat horse
+email joe8@joe.com
+12key :  xray umbrella banana grape banana rabbit kiwi jungle kiwi tiger apple grape
 
 
 

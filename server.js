@@ -16,151 +16,113 @@ const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.JWT_SECRET || 'supersecret123!@#';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
-// Your Stripe price IDs
-const PRICE_WEEKLY = 'price_1SIBPkFF2HALdyFkogiGJG5w';
-const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq';
+// Stripe price IDs
+const PRICE_WEEKLY = 'price_1SIBPkFF2HALdyFkogiGJG5w'; // 7-day
+const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq'; // 30-day
 const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://movies-auth-app.onrender.com' : 'http://localhost:3000';
 
-
-
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Webhook route with raw body parser
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    // Ensure raw body is used for signature verification
-    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-    console.log('✅ Webhook received and verified:', {
-      type: event.type,
-      id: event.id,
-      customer: event.data.object.customer || 'N/A',
-      subscription: event.data.object.subscription || 'N/A'
-    });
-  } catch (err) {
-    console.log('💥 Webhook signature error:', {
-      message: err.message,
-      headers: req.headers,
-      bodyLength: req.body?.length
-    });
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  try {
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      if (session.mode === 'subscription' && session.subscription) {
-        const subscriptionId = session.subscription;
-        const customerId = session.customer;
-
-        // Verify customer exists in DB
-        const [rows] = await pool.execute(
-          'SELECT id FROM users WHERE customer_id = ?',
-          [customerId]
-        );
-        if (rows.length === 0) {
-          console.log('💥 Webhook error: Customer not found:', customerId);
-          return res.status(400).json({ error: 'Customer not found' });
-        }
-
-        // Update subscription status
-        const [result] = await pool.execute(
-          'UPDATE users SET subscription_id = ?, subscription_active = TRUE WHERE customer_id = ?',
-          [subscriptionId, customerId]
-        );
-        console.log('✅ Subscription activated:', {
-          customerId,
-          subscriptionId,
-          rowsAffected: result.affectedRows
-        });
-      } else {
-        console.log('⚠️ Webhook: Not a subscription session:', session.mode);
-      }
-    } else if (event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.canceled') {
-      const subscription = event.data.object;
-      const [result] = await pool.execute(
-        'UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE subscription_id = ?',
-        [subscription.id]
-      );
-      console.log('✅ Subscription deactivated:', {
-        subscriptionId: subscription.id,
-        rowsAffected: result.affectedRows
-      });
-    } else if (event.type === 'invoice.payment_failed') {
-      console.log('⚠️ Payment failed for subscription:', event.data.object.subscription);
-    }
-  } catch (err) {
-    console.log('💥 Webhook processing error:', {
-      eventType: event.type,
-      error: err.message,
-      stack: err.stack
-    });
-    return res.status(500).json({ error: 'Webhook processing failed' });
-  }
-
-  res.json({ received: true });
-});
-
-// Fallback endpoint to verify session
-app.post('/verify-session', verifyToken, async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    if (!sessionId) {
-      console.log('💥 Verify session error: No session ID provided');
-      return res.status(400).json({ error: 'No session ID' });
-    }
-
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.mode !== 'subscription' || !session.subscription) {
-      console.log('💥 Verify session error: Invalid session', session.mode);
-      return res.status(400).json({ error: 'Invalid session' });
-    }
-
-    const [rows] = await pool.execute(
-      'SELECT customer_id FROM users WHERE id = ?',
-      [req.userId]
-    );
-    if (rows.length === 0 || rows[0].customer_id !== session.customer) {
-      console.log('💥 Verify session error: Customer mismatch', {
-        userId: req.userId,
-        sessionCustomer: session.customer
-      });
-      return res.status(400).json({ error: 'Customer mismatch' });
-    }
-
-    const [result] = await pool.execute(
-      'UPDATE users SET subscription_id = ?, subscription_active = TRUE WHERE id = ?',
-      [session.subscription, req.userId]
-    );
-    console.log('✅ Fallback subscription activated:', {
-      userId: req.userId,
-      subscriptionId: session.subscription,
-      rowsAffected: result.affectedRows
-    });
-
-    res.json({ active: result.affectedRows > 0 });
-  } catch (error) {
-    console.log('💥 Verify session error:', error.message);
-    res.status(500).json({ error: 'Session verification failed' });
-  }
-});
-
-// JSON body parser for other routes
-app.use(bodyParser.json({ limit: '100mb' }));
-app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
+// Middleware setup
 app.use(cookieParser());
 app.use(cors({
   origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app', 'https://spauth.techsport.app'],
   credentials: true
 }));
 
-const dbConfig = { 
+// Webhook route with raw body parser (must be first)
+app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
 
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    console.log('✅ Webhook received:', { type: event.type, id: event.id });
+  } catch (err) {
+    console.error('💥 Webhook error:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    if (session.mode === 'subscription' && session.subscription && session.metadata.userId) {
+      const subscriptionId = session.subscription;
+      const userId = session.metadata.userId;
+      const customerId = session.customer;
+      const [rows] = await pool.execute('SELECT id FROM users WHERE id = ?', [userId]);
+      if (rows.length === 0) {
+        console.error('💥 User not found:', userId);
+        return res.status(400).json({ error: 'User not found' });
+      }
+      await pool.execute(
+        'UPDATE users SET customer_id = ?, subscription_id = ?, subscription_active = TRUE WHERE id = ?',
+        [customerId, subscriptionId, userId]
+      );
+      console.log('✅ Subscription activated:', { userId, subscriptionId, customerId });
+    }
+  } else if (event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.canceled') {
+    const subscription = event.data.object;
+    await pool.execute(
+      'UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE subscription_id = ?',
+      [subscription.id]
+    );
+    console.log('✅ Subscription deactivated:', subscription.id);
+  }
+
+  res.json({ received: true });
+});
+
+// Subscription folder middleware
+async function checkSubscription(req, res, next) {
+  const token = req.cookies?.authToken;
+  if (!token) {
+    console.error('❌ No token for subscription content');
+    return res.status(403).send(`
+      <script>
+        alert('This page is for subscriptions. Please subscribe to access premium content.');
+        window.location.href = '/profile.html';
+      </script>
+    `);
+  }
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    const [rows] = await pool.execute('SELECT subscription_active FROM users WHERE id = ?', [decoded.id]);
+    if (rows.length === 0 || !rows[0].subscription_active) {
+      console.log('✅ Subscription check failed for user ID:', decoded.id);
+      return res.status(403).send(`
+        <script>
+          alert('This page is for subscriptions. Please subscribe to access premium content.');
+          window.location.href = '/profile.html';
+        </script>
+      `);
+    }
+    console.log('✅ Subscription check passed for user ID:', decoded.id);
+    next();
+  } catch (error) {
+    console.error('💥 Subscription check error:', error.message);
+    return res.status(403).send(`
+      <script>
+        alert('This page is for subscriptions. Please subscribe to access premium content.');
+        window.location.href = '/profile.html';
+      </script>
+    `);
+  }
+}
+app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
+
+// Other middleware
+app.use(bodyParser.json({ limit: '100mb' }));
+app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Secure DB config using .env
+const dbConfig = {
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  port: process.env.MYSQL_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -171,13 +133,12 @@ async function connectDB() {
   try {
     await pool.getConnection();
     console.log('✅ MySQL Connected');
-
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(255)`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR(255)`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT FALSE`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS picture_base64 TEXT`);
   } catch (err) {
-    console.log('❌ MySQL Error:', err.message);
+    console.error('❌ MySQL Error:', err.message);
   }
 }
 connectDB();
@@ -193,10 +154,10 @@ function generateMnemonic() {
 }
 
 async function verifyToken(req, res, next) {
-  const token = req.cookies.authToken;
+  const token = req.cookies?.authToken;
   if (!token) {
-    console.log('❌ No token in request');
-    return res.status(403).json({ error: 'No token' });
+    console.error('❌ No token in request');
+    return res.status(403).json({ error: 'No token provided' });
   }
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
@@ -204,7 +165,7 @@ async function verifyToken(req, res, next) {
     console.log('✅ Token verified for user ID:', req.userId);
     next();
   } catch (error) {
-    console.log('❌ Invalid token:', error.message);
+    console.error('❌ Invalid token:', error.message);
     res.status(401).json({ error: 'Invalid token' });
   }
 }
@@ -212,7 +173,7 @@ async function verifyToken(req, res, next) {
 app.post('/signup', async (req, res) => {
   console.log('🔥 SIGNUP:', req.body);
   try {
-    const { username, email, password, subscription_type } = req.body;
+    const { username, email, password } = req.body;
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Missing fields' });
     }
@@ -239,7 +200,7 @@ app.post('/signup', async (req, res) => {
     console.log('✅ Signup success:', username);
     res.json({ mnemonic, success: true });
   } catch (error) {
-    console.log('💥 Signup error:', error.message);
+    console.error('💥 Signup error:', error.message);
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(400).json({ error: 'Username or email exists' });
     }
@@ -259,19 +220,19 @@ app.post('/login', async (req, res) => {
       'SELECT * FROM users WHERE (username = ? OR email = ?) AND mnemonic = ?',
       [login, login, mnemonic]
     );
-    
+
     if (rows.length === 0) {
-      console.log('❌ No user found for login:', login);
+      console.error('❌ No user found for login:', login);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
+
     const user = rows[0];
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
-      console.log('❌ Password mismatch for user:', login);
+      console.error('❌ Password mismatch for user:', login);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
+
     const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '7d' });
     res.cookie('authToken', token, {
       httpOnly: true,
@@ -279,10 +240,10 @@ app.post('/login', async (req, res) => {
       sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
-    console.log('✅ Login success:', user.username, 'Cookie set:', token.substring(0, 20) + '...');
+    console.log('✅ Login success:', user.username);
     res.json({ success: true });
   } catch (error) {
-    console.log('💥 Login error:', error.message);
+    console.error('💥 Login error:', error.message);
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -293,23 +254,23 @@ app.get('/profile', verifyToken, async (req, res) => {
       'SELECT username, email, subscription_active, subscription_id, picture_base64 FROM users WHERE id = ?',
       [req.userId]
     );
-    
+
     if (rows.length === 0) {
-      console.log('❌ User not found for ID:', req.userId);
+      console.error('❌ User not found for ID:', req.userId);
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     const user = rows[0];
     console.log(`👤 Profile loaded: ${user.username} - Subscription: ${user.subscription_active ? 'Active' : 'Inactive'}`);
-    
-    res.json({ 
-      username: user.username, 
+
+    res.json({
+      username: user.username,
       email: user.email,
       subscription_active: user.subscription_active,
       picture_base64: user.picture_base64
     });
   } catch (error) {
-    console.log('💥 Profile error:', error.message);
+    console.error('💥 Profile error:', error.message);
     res.status(500).json({ error: 'Profile failed' });
   }
 });
@@ -348,8 +309,31 @@ app.post('/create-checkout-session', verifyToken, async (req, res) => {
     });
     res.json({ url: session.url });
   } catch (error) {
-    console.log('💥 Checkout error:', error.message);
+    console.error('💥 Checkout error:', error.message);
     res.status(500).json({ error: 'Checkout failed' });
+  }
+});
+
+app.post('/verify-session', verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ error: 'No session ID' });
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.mode !== 'subscription' || !session.subscription) return res.status(400).json({ error: 'Invalid session' });
+    const [rows] = await pool.execute('SELECT id, customer_id FROM users WHERE id = ?', [req.userId]);
+    if (rows.length === 0) return res.status(400).json({ error: 'User not found' });
+    if (!rows[0].customer_id) {
+      await pool.execute('UPDATE users SET customer_id = ? WHERE id = ?', [session.customer, req.userId]);
+    }
+    await pool.execute(
+      'UPDATE users SET subscription_id = ?, subscription_active = TRUE WHERE id = ?',
+      [session.subscription, req.userId]
+    );
+    console.log('✅ Fallback subscription activated:', { userId: req.userId, subscriptionId: session.subscription });
+    res.json({ active: true });
+  } catch (error) {
+    console.error('💥 Verify session error:', error.message);
+    res.status(500).json({ error: 'Session verification failed' });
   }
 });
 
@@ -367,7 +351,7 @@ app.post('/delete-subscription', verifyToken, async (req, res) => {
     console.log('✅ Subscription cancelled for user ID:', req.userId);
     res.json({ success: true });
   } catch (error) {
-    console.log('💥 Cancel error:', error.message);
+    console.error('💥 Cancel error:', error.message);
     res.status(500).json({ error: 'Cancel failed' });
   }
 });
@@ -378,7 +362,7 @@ app.get('/check-subscription', verifyToken, async (req, res) => {
     console.log('✅ Subscription check for user ID:', req.userId, 'Active:', rows[0]?.subscription_active || false);
     res.json({ active: rows[0]?.subscription_active || false });
   } catch (error) {
-    console.log('💥 Check subscription error:', error.message);
+    console.error('💥 Check subscription error:', error.message);
     res.status(500).json({ error: 'Check failed' });
   }
 });
@@ -390,7 +374,7 @@ app.post('/upload-picture', verifyToken, async (req, res) => {
     console.log('✅ Picture uploaded for user ID:', req.userId);
     res.json({ success: true });
   } catch (error) {
-    console.log('💥 Upload picture error:', error.message);
+    console.error('💥 Upload picture error:', error.message);
     res.status(500).json({ error: 'Upload failed' });
   }
 });
