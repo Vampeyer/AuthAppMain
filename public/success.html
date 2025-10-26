@@ -1,0 +1,39 @@
+<!-- public/success.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Success</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding-top: 80px; background: #f8f9fa; }
+    .container { text-align: center; }
+    .spinner-border { margin: 20px auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="display-4">🎉 Payment Successful!</h1>
+    <p class="lead">Redirecting to your movies...</p>
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+    <p id="statusMessage">Please wait...</p>
+  </div>
+
+  <script>
+    const REDIRECT_URL = '/movie_content.html';
+
+    window.addEventListener('load', () => {
+      console.log('Payment success, redirecting in 2 seconds');
+      document.getElementById('statusMessage').textContent = 'Redirecting to movies in 2 seconds...';
+      setTimeout(() => {
+        console.log(`Redirecting to ${REDIRECT_URL} from success.html`);
+        window.location.href = REDIRECT_URL;
+      }, 2000);
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

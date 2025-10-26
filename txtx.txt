@@ -1,0 +1,35 @@
+lemon cat kiwi orange lemon xray grape snake snake apple horse horse
+
+
+un: joe2
+pw : password 
+12key : jungle jungle jungle whale grape umbrella whale umbrella cat dog nut queen
+
+un: joe20
+pw : password 
+email joe20@joe.com
+12key : horse dog ice queen orange rabbit banana banana pear apple cat horse
+
+un: joe4
+pw : password 
+email joe4@joe.com
+12key : umbrella kiwi orange banana grape ice nut snake pear xray orange monkey
+
+
+joe 5  - 12-key phrase: kiwi dog whale horse monkey grape banana kiwi umbrella kiwi zebra monkey
+
+fin -  horse rabbit umbrella queen ice tiger ice fox nut nut zebra elephant
+
+horse dog ice queen orange rabbit banana banana pear apple cat horse
+
+
+
+WEBHOOX! + STRIPE ! 
+++++++++++++++++++++++++++++++++++++++
+
+Microsoft Windows [Version 10.0.19044.6456]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\guy>stripe listen --forward-to http://localhost:3000/webhook
+
+> Ready! You are using Stripe API Version [2022-11-15]. Your webhook signing secret is whsec_8efb27ef958fd9eee50d59e5ab09d5cbed9a57e5d9976e0ca750f6eb9cd0e13a (^C to quit)

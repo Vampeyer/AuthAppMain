@@ -1,0 +1,118 @@
+<!-- public/signup.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up - Movies App</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding-top: 120px; }
+    .card { border-radius: 15px; }
+    #saveConfirmation { display: none; text-align: center; margin-top: 20px; }
+    #saveConfirmation h3 { font-size: 1.8rem; font-weight: bold; color: #28a745; }
+    #doneButton { margin-top: 15px; }
+  </style>
+</head>
+<body class="bg-light">
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+    <div class="container">
+      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="index.html">🏠 Home</a></li>
+          <li class="nav-item"><a class="nav-link active" href="signup.html">📝 Sign Up</a></li>
+          <li class="nav-item"><a class="nav-link" href="login.html">🔐 Login</a></li>
+          <li class="nav-item"><a class="nav-link" href="movie_content.html">🌟 Movie Content</a></li>
+          <li class="nav-item"><a class="nav-link" href="profile.html">👤 Profile</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container mt-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-6">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h2 class="card-title text-center mb-4">📝 Sign Up</h2>
+            <form id="signupForm">
+              <div class="mb-3">
+                <input type="text" class="form-control" id="signupUsername" placeholder="Username" required>
+              </div>
+              <div class="mb-3">
+                <input type="email" class="form-control" id="signupEmail" placeholder="Email" required>
+              </div>
+              <div class="mb-3">
+                <input type="password" class="form-control" id="signupPassword" placeholder="Password" required>
+              </div>
+              <div class="mb-3">
+                <select class="form-select" id="subscriptionType">
+                  <option value="">No Subscription</option>
+                  <option value="weekly">Weekly (7 days)</option>
+                  <option value="monthly">Monthly (30 days)</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Sign Up</button>
+            </form>
+            <div id="saveConfirmation">
+              <h3>I HAVE SAVED MY KEYS!</h3>
+              <button id="doneButton" class="btn btn-success w-100">DONE</button>
+            </div>
+            <p class="text-center mt-3" id="mnemonicDisplay"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+const API_URL = window.location.hostname.includes('techsport.app') ? 'https://movies-auth-app.onrender.com' : 'http://localhost:3000';
+    const signupForm = document.getElementById('signupForm');
+    const mnemonicDisplay = document.getElementById('mnemonicDisplay');
+    const saveConfirmation = document.getElementById('saveConfirmation');
+    const doneButton = document.getElementById('doneButton');
+
+    signupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('signupUsername').value;
+      const email = document.getElementById('signupEmail').value;
+      const password = document.getElementById('signupPassword').value;
+      const subscription_type = document.getElementById('subscriptionType').value;
+
+      try {
+        console.log('Sending signup request:', { username, email, subscription_type });
+        const response = await fetch(`${API_URL}/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, email, password, subscription_type }),
+          credentials: 'include'
+        });
+        const data = await response.json();
+        console.log('Signup response:', data);
+        if (data.success) {
+          mnemonicDisplay.textContent = `Your 12-key phrase: ${data.mnemonic}`;
+          mnemonicDisplay.style.display = 'block';
+          saveConfirmation.style.display = 'block';
+          signupForm.style.display = 'none';
+          doneButton.focus();
+
+          doneButton.addEventListener('click', () => {
+            alert('Signup complete! Proceeding to login.');
+            window.location.href = '/login.html';
+          });
+        } else {
+          alert(data.error || 'Signup failed');
+        }
+      } catch (error) {
+        console.error('Signup error:', error);
+        alert('Error during signup: ' + error.message);
+      }
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

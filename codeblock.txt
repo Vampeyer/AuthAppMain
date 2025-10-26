@@ -1,0 +1,439 @@
+const express = require('express');
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const bodyParser = require('body-parser');
+const path = require('path');
+const cors = require('cors');
+
+const app = express();
+const PORT = 3000;
+const SECRET_KEY = 'your-secret-key';
+
+// Configurable subscription durations (in days) - Change these values to adjust timing
+const SUBSCRIPTION_DURATIONS = {
+  WEEKLY: 7,  // Change to e.g., 1 for 1-day test
+  MONTHLY: 30 // Change to e.g., 2 for 2-day test
+};
+
+// Stripe test configuration (default off, change to enable)
+const STRIPE_TEST_MODE = false;
+const STRIPE_TEST_KEY = 'sk_test_123456789'; // Replace with your key
+const STRIPE_WEBHOOK_SECRET = 'whsec_123456789'; // Replace with your secret
+
+// Serve static files from the public/ folder
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Default route to serve index.html from public/ folder
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.use(bodyParser.json({ limit: '100mb', parameterLimit: 5000000 }));
+app.use(bodyParser.urlencoded({ limit: '100mb', extended: true, parameterLimit: 5000000 }));
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://127.0.0.1:5500'],
+  credentials: true
+}));
+
+const dbConfig = { host: 'localhost', user: 'root', password: '', database: 'auth_app' };
+let db;
+async function connectDB() {
+  try {
+    db = await mysql.createConnection(dbConfig);
+    console.log('✅ MySQL Connected');
+  } catch (err) {
+    console.log('❌ MySQL Error:', err.message);
+  }
+}
+connectDB();
+
+const wordList = ['apple', 'banana', 'cat', 'dog', 'elephant', 'fox', 'grape', 'horse', 'ice', 'jungle', 'kiwi', 'lemon', 'monkey', 'nut', 'orange', 'pear', 'queen', 'rabbit', 'snake', 'tiger', 'umbrella', 'violet', 'whale', 'xray', 'yellow', 'zebra'];
+
+function generateMnemonic() {
+  let mnemonic = [];
+  for (let i = 0; i < 12; i++) {
+    mnemonic.push(wordList[Math.floor(Math.random() * wordList.length)]);
+  }
+  return mnemonic.join(' ');
+}
+
+app.post('/signup', async (req, res) => {
+  console.log('🔥 SIGNUP:', req.body);
+  try {
+    const { username, email, password, subscription_type } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Missing fields' });
+    }
+    const password_hash = await bcrypt.hash(password, 10);
+    const mnemonic = generateMnemonic();
+    const subscription_start = subscription_type ? new Date() : null;
+    const subscription_duration = subscription_type ? SUBSCRIPTION_DURATIONS[subscription_type.toUpperCase()] : null;
+
+    await db.execute(`CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(255) UNIQUE,
+      email VARCHAR(255) UNIQUE,
+      password_hash VARCHAR(255),
+      mnemonic TEXT,
+      subscription_start DATETIME,
+      subscription_duration INT
+    )`);
+
+    await db.execute(
+      'INSERT INTO users (username, email, password_hash, mnemonic, subscription_start, subscription_duration) VALUES (?, ?, ?, ?, ?, ?)',
+      [username, email, password_hash, mnemonic, subscription_start, subscription_duration]
+    );
+
+    console.log('✅ Signup success:', username);
+    res.json({ mnemonic, success: true });
+  } catch (error) {
+    console.log('💥 Signup error:', error.message);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: 'Username or email exists' });
+    }
+    res.status(500).json({ error: 'Signup failed' });
+  }
+});
+
+app.post('/login', async (req, res) => {
+  console.log('🔐 LOGIN:', req.body);
+  try {
+    const { login, password, mnemonic } = req.body;
+    if (!login || !password || !mnemonic) {
+      return res.status(400).json({ error: 'All fields required' });
+    }
+
+    const [rows] = await db.execute(
+      'SELECT * FROM users WHERE (username = ? OR email = ?) AND mnemonic = ?',
+      [login, login, mnemonic]
+    );
+    
+    if (rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    const user = rows[0];
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '7d' });
+    console.log('✅ Login success:', user.username);
+    res.json({ token });
+  } catch (error) {
+    console.log('💥 Login error:', error.message);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.get('/profile', async (req, res) => {
+  const token = req.headers['authorization'];
+  if (!token) return res.status(403).json({ error: 'No token' });
+  
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    const [rows] = await db.execute(
+      'SELECT username, email, subscription_start, subscription_duration FROM users WHERE id = ?',
+      [decoded.id]
+    );
+    
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    const user = rows[0];
+    const now = new Date('2025-10-23T23:53:00-04:00'); // Current date/time: 11:53 PM EDT, October 23, 2025
+    let isActive = false;
+    let expiryDate = null;
+    if (user.subscription_start && user.subscription_duration) {
+      const expiry = new Date(user.subscription_start);
+      expiry.setDate(expiry.getDate() + user.subscription_duration);
+      isActive = expiry > now;
+      expiryDate = expiry.toLocaleString('en-US', { timeZone: 'America/New_York' }); // EDT format
+    }
+    
+    console.log(`👤 Profile loaded: ${user.username} - Subscription: ${isActive ? 'Active' : 'Inactive'}`);
+    
+    res.json({ 
+      username: user.username, 
+      email: user.email,
+      subscription_active: isActive,
+      subscription_expiry: expiryDate
+    });
+  } catch (error) {
+    console.log('💥 Profile error:', error.message);
+    res.status(500).json({ error: 'Profile failed' });
+  }
+});
+
+app.post('/subscribe', async (req, res) => {
+  const token = req.headers['authorization'];
+  if (!token) return res.status(403).json({ error: 'No token' });
+  
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    const { type } = req.body;
+    
+    const duration = SUBSCRIPTION_DURATIONS[type.toUpperCase()];
+    if (!duration) return res.status(400).json({ error: 'Invalid subscription type' });
+
+    if (STRIPE_TEST_MODE) {
+      const stripe = require('stripe')(STRIPE_TEST_KEY);
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: `${type} Subscription`,
+            },
+            unit_amount: type === 'WEEKLY' ? 500 : 1000, // $5 or $10 in cents
+          },
+          quantity: 1,
+        }],
+        mode: 'payment',
+        success_url: 'http://localhost:3000/index.html',
+        cancel_url: 'http://localhost:3000/profile.html',
+        metadata: { userId: decoded.id, subscriptionType: type }
+      });
+      res.json({ success: true, sessionId: session.id });
+    } else {
+      await db.execute(
+        'UPDATE users SET subscription_start = NOW(), subscription_duration = ? WHERE id = ?',
+        [duration, decoded.id]
+      );
+      res.json({ success: true });
+    }
+  } catch (error) {
+    console.log('💥 Subscription error:', error.message);
+    res.status(500).json({ error: 'Subscription failed' });
+  }
+});
+
+app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  if (STRIPE_TEST_MODE) {
+    const sig = req.headers['stripe-signature'];
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+      console.log('🔔 Stripe webhook received:', event.type);
+      if (event.type === 'payment_intent.succeeded') {
+        const { userId, subscriptionType } = event.data.object.metadata;
+        const duration = SUBSCRIPTION_DURATIONS[subscriptionType.toUpperCase()];
+        await db.execute(
+          'UPDATE users SET subscription_start = NOW(), subscription_duration = ? WHERE id = ?',
+          [duration, userId]
+        );
+      }
+      res.json({ received: true });
+    } catch (err) {
+      console.log('💥 Webhook error:', err.message);
+      res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+  } else {
+    res.status(403).json({ error: 'Stripe test mode disabled' });
+  }
+});
+
+app.post('/delete-subscription', async (req, res) => {
+  const token = req.headers['authorization'];
+  if (!token) return res.status(403).json({ error: 'No token' });
+  
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    await db.execute(
+      'UPDATE users SET subscription_start = NULL, subscription_duration = NULL WHERE id = ?',
+      [decoded.id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server: http://localhost:${PORT}`);
+  console.log(`✅ Subscription durations: WEEKLY=${SUBSCRIPTION_DURATIONS.WEEKLY}d, MONTHLY=${SUBSCRIPTION_DURATIONS.MONTHLY}d`);
+  console.log(`✅ Stripe test mode: ${STRIPE_TEST_MODE ? 'ENABLED' : 'DISABLED'}`);
+});
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile - Movies App</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding-top: 80px; }
+    .profile-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 20px;
+      padding: 40px;
+      margin-bottom: 30px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 0.5rem 1.5rem;
+      border-radius: 20px; /* Full oval */
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+    .green { background-color: #28a745; color: white; }
+    .red { background-color: #dc3545; color: white; }
+    #expiryDisplay { font-size: 1.1rem; margin-top: 10px; }
+  </style>
+</head>
+<body class="bg-light">
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+    <div class="container">
+      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="index.html">🏠 Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="signup.html">📝 Sign Up</a></li>
+          <li class="nav-item"><a class="nav-link" href="login.html">🔐 Login</a></li>
+          <li class="nav-item"><a class="nav-link" href="movie_content.html">🌟 Movie Content</a></li>
+          <li class="nav-item"><a class="nav-link active" href="profile.html">👤 Profile</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container mt-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <div class="profile-header text-center">
+          <h1 id="usernameDisplay" class="mb-3">Loading...</h1>
+          <p class="lead mb-4">Email: <span id="emailDisplay">Loading...</span></p>
+          <div class="d-flex justify-content-center align-items-center">
+            <span id="statusCircle" class="status-badge red">No</span>
+          </div>
+          <p id="expiryDisplay" class="text-center">Expiry: Loading...</p>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-12">
+            <div class="card shadow-sm">
+              <div class="card-body p-4">
+                <h5 class="card-title mb-4">💎 Subscription Management</h5>
+                <button class="btn btn-outline-primary w-100 mb-3 py-3 fs-5" onclick="subscribe('WEEKLY')">
+                  Weekly Plan (7 days)
+                </button>
+                <button class="btn btn-primary w-100 mb-3 py-3 fs-5" onclick="subscribe('MONTHLY')">
+                  Monthly Plan (30 days)
+                </button>
+                <button class="btn btn-danger w-100 py-3 fs-5" onclick="deleteSubscription()">
+                  🗑️ Delete Subscription
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-center mt-5">
+          <button class="btn btn-outline-secondary btn-lg px-5" onclick="logout()">
+            Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:3000';
+
+    function getToken() { return localStorage.getItem('token'); }
+
+    async function loadProfile() {
+      const token = getToken();
+      if (!token) {
+        window.location.href = 'login.html';
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/profile`, {
+          headers: { 'Authorization': token }
+        });
+        const data = await response.json();
+        
+        document.getElementById('usernameDisplay').textContent = data.username;
+        document.getElementById('emailDisplay').textContent = data.email;
+
+        const statusCircle = document.getElementById('statusCircle');
+        const expiryDisplay = document.getElementById('expiryDisplay');
+        if (data.subscription_active) {
+          statusCircle.textContent = 'Yes';
+          statusCircle.classList.add('green');
+          statusCircle.classList.remove('red');
+          expiryDisplay.textContent = `Expiry: ${data.subscription_expiry || 'N/A'}`;
+        } else {
+          statusCircle.textContent = 'No';
+          statusCircle.classList.add('red');
+          statusCircle.classList.remove('green');
+          expiryDisplay.textContent = 'Expiry: N/A';
+        }
+      } catch (error) {
+        alert('Profile failed: ' + error.message);
+        window.location.href = 'login.html';
+      }
+    }
+
+    window.subscribe = async function(type) {
+      const token = getToken();
+      try {
+        const response = await fetch(`${API_URL}/subscribe`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': token 
+          },
+          body: JSON.stringify({ type })
+        });
+        const data = await response.json();
+        if (data.success) {
+          if (STRIPE_TEST_MODE && data.sessionId) {
+            window.location.href = data.sessionId; // Redirect to Stripe checkout
+          } else {
+            alert(`✅ ${type === 'WEEKLY' ? 'Weekly' : 'Monthly'} activated!`);
+            window.location.href = 'movie_content.html';
+          }
+        }
+      } catch (error) {
+        alert('Subscription failed');
+      }
+    };
+
+    window.deleteSubscription = async function() {
+      if (!confirm('Delete subscription?')) return;
+      const token = getToken();
+      try {
+        const response = await fetch(`${API_URL}/delete-subscription`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': token 
+          }
+        });
+        const data = await response.json();
+        if (data.success) {
+          alert('🗑️ Subscription deleted!');
+          loadProfile();
+        }
+      } catch (error) {
+        alert('Delete failed');
+      }
+    };
+
+    window.logout = function() {
+      localStorage.removeItem('token');
+      window.location.href = 'index.html';
+    };
+
+    window.addEventListener('load', loadProfile);
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
