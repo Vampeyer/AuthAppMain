@@ -14,12 +14,15 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.JWT_SECRET || 'supersecret123!@#';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_MUHtFyE25fzww8jF527ca1Xg9vpm5DZy';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_i93P8B7vfplPpweehki6wKdWozoJGhmZ';
 
 // Stripe price IDs
-const PRICE_WEEKLY = 'price_1SMfgdFCHgBJi4TFgfkS65iH'; // 7 days for $2.95
-const PRICE_MONTHLY = 'price_1SMfgjFCHgBJi4TF1D8vakun'; // 30 days for $7.75
+const PRICE_WEEKLY = 'price_1SIBPkFF2HALdyFkogiGJG5w'; // 7 days for $2.95
+const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq'; // 30 days for $7.75
+
 const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onrender.com' : 'http://localhost:3000';
+
+//const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onrender.com' : 'http://localhost:3000';
 
 // Middleware setup
 app.use(cookieParser());
@@ -348,38 +351,17 @@ app.post('/delete-subscription', verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT subscription_id FROM users WHERE id = ?', [req.userId]);
     const subscriptionId = rows[0]?.subscription_id;
+    if (!subscriptionId) return res.status(400).json({ error: 'No subscription' });
 
-    if (!subscriptionId) {
-      console.log('⚠️ No active subscription to cancel for user ID:', req.userId);
-      return res.status(400).json({ error: 'No active subscription' });
-    }
-
-    let stripeCancelled = false;
-    try {
-      // Try to cancel in Stripe
-      await stripe.subscriptions.cancel(subscriptionId);
-      console.log('✅ Stripe subscription cancelled:', subscriptionId);
-      stripeCancelled = true;
-    } catch (stripeError) {
-      console.error('💥 Stripe cancel error:', stripeError.message);
-      if (stripeError.code === 'resource_missing') {
-        console.log('⚠️ Subscription not found in Stripe, clearing from DB anyway');
-      } else {
-        // Don't fail the whole request — still clear DB
-        console.warn('Stripe cancel failed, but proceeding to clear DB');
-      }
-    }
-
-    // Always clear from DB, even if Stripe failed
+    await stripe.subscriptions.cancel(subscriptionId);
     await pool.execute(
       'UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE id = ?',
       [req.userId]
     );
-    console.log('✅ Subscription deactivated in DB for user ID:', req.userId);
-
+    console.log('✅ Subscription cancelled for user ID:', req.userId);
     res.json({ success: true });
   } catch (error) {
-    console.error('💥 Cancel subscription error:', error.message);
+    console.error('💥 Cancel error:', error.message);
     res.status(500).json({ error: 'Cancel failed' });
   }
 });
