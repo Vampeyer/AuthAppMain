@@ -14,12 +14,12 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.JWT_SECRET || 'supersecret123!@#';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_MUHtFyE25fzww8jF527ca1Xg9vpm5DZy';
 
 // Stripe price IDs
-const PRICE_WEEKLY = 'price_1SIBPkFF2HALdyFkogiGJG5w'; // 7-day
-const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq'; // 30-day
-const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://movies-auth-app.onrender.com' : 'http://localhost:3000';
+const PRICE_WEEKLY = 'price_1SMfgdFCHgBJi4TFgfkS65iH'; // 7 days for $2.95
+const PRICE_MONTHLY = 'price_1SMfgjFCHgBJi4TF1D8vakun'; // 30 days for $7.75
+const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onrender.com' : 'http://localhost:3000';
 
 // Middleware setup
 app.use(cookieParser());
@@ -116,7 +116,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Secure DB config using .env
+// MySQL setup
 const dbConfig = {
   host: process.env.MYSQL_HOST,
   user: process.env.MYSQL_USER,
@@ -136,7 +136,6 @@ async function connectDB() {
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(255)`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR(255)`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT FALSE`);
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS picture_base64 TEXT`);
   } catch (err) {
     console.error('❌ MySQL Error:', err.message);
   }
@@ -188,8 +187,7 @@ app.post('/signup', async (req, res) => {
       mnemonic TEXT,
       customer_id VARCHAR(255),
       subscription_id VARCHAR(255),
-      subscription_active BOOLEAN DEFAULT FALSE,
-      picture_base64 TEXT
+      subscription_active BOOLEAN DEFAULT FALSE
     )`);
 
     await pool.execute(
@@ -251,7 +249,7 @@ app.post('/login', async (req, res) => {
 app.get('/profile', verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      'SELECT username, email, subscription_active, subscription_id, picture_base64 FROM users WHERE id = ?',
+      'SELECT username, email, subscription_active, subscription_id FROM users WHERE id = ?',
       [req.userId]
     );
 
@@ -262,12 +260,10 @@ app.get('/profile', verifyToken, async (req, res) => {
 
     const user = rows[0];
     console.log(`👤 Profile loaded: ${user.username} - Subscription: ${user.subscription_active ? 'Active' : 'Inactive'}`);
-
     res.json({
       username: user.username,
       email: user.email,
-      subscription_active: user.subscription_active,
-      picture_base64: user.picture_base64
+      subscription_active: user.subscription_active
     });
   } catch (error) {
     console.error('💥 Profile error:', error.message);
@@ -290,6 +286,21 @@ app.post('/create-checkout-session', verifyToken, async (req, res) => {
       customerId = customer.id;
       await pool.execute('UPDATE users SET customer_id = ? WHERE id = ?', [customerId, req.userId]);
       console.log('✅ New Stripe customer created:', customerId);
+    } else {
+      // Verify customer exists in Stripe
+      try {
+        await stripe.customers.retrieve(customerId);
+      } catch (err) {
+        if (err.code === 'resource_missing') {
+          console.log('❌ Invalid customer ID, creating new one:', customerId);
+          const customer = await stripe.customers.create({ email: user.email });
+          customerId = customer.id;
+          await pool.execute('UPDATE users SET customer_id = ? WHERE id = ?', [customerId, req.userId]);
+          console.log('✅ New Stripe customer created:', customerId);
+        } else {
+          throw err;
+        }
+      }
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -302,11 +313,7 @@ app.post('/create-checkout-session', verifyToken, async (req, res) => {
       metadata: { userId: req.userId.toString() }
     });
 
-    console.log('✅ Checkout session created:', {
-      sessionId: session.id,
-      customerId,
-      priceId
-    });
+    console.log('✅ Checkout session created:', { sessionId: session.id, customerId, priceId });
     res.json({ url: session.url });
   } catch (error) {
     console.error('💥 Checkout error:', error.message);
@@ -341,17 +348,38 @@ app.post('/delete-subscription', verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT subscription_id FROM users WHERE id = ?', [req.userId]);
     const subscriptionId = rows[0]?.subscription_id;
-    if (!subscriptionId) return res.status(400).json({ error: 'No subscription' });
 
-    await stripe.subscriptions.cancel(subscriptionId);
+    if (!subscriptionId) {
+      console.log('⚠️ No active subscription to cancel for user ID:', req.userId);
+      return res.status(400).json({ error: 'No active subscription' });
+    }
+
+    let stripeCancelled = false;
+    try {
+      // Try to cancel in Stripe
+      await stripe.subscriptions.cancel(subscriptionId);
+      console.log('✅ Stripe subscription cancelled:', subscriptionId);
+      stripeCancelled = true;
+    } catch (stripeError) {
+      console.error('💥 Stripe cancel error:', stripeError.message);
+      if (stripeError.code === 'resource_missing') {
+        console.log('⚠️ Subscription not found in Stripe, clearing from DB anyway');
+      } else {
+        // Don't fail the whole request — still clear DB
+        console.warn('Stripe cancel failed, but proceeding to clear DB');
+      }
+    }
+
+    // Always clear from DB, even if Stripe failed
     await pool.execute(
       'UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE id = ?',
       [req.userId]
     );
-    console.log('✅ Subscription cancelled for user ID:', req.userId);
+    console.log('✅ Subscription deactivated in DB for user ID:', req.userId);
+
     res.json({ success: true });
   } catch (error) {
-    console.error('💥 Cancel error:', error.message);
+    console.error('💥 Cancel subscription error:', error.message);
     res.status(500).json({ error: 'Cancel failed' });
   }
 });
@@ -364,18 +392,6 @@ app.get('/check-subscription', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('💥 Check subscription error:', error.message);
     res.status(500).json({ error: 'Check failed' });
-  }
-});
-
-app.post('/upload-picture', verifyToken, async (req, res) => {
-  try {
-    const { image_base64 } = req.body;
-    await pool.execute('UPDATE users SET picture_base64 = ? WHERE id = ?', [image_base64, req.userId]);
-    console.log('✅ Picture uploaded for user ID:', req.userId);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('💥 Upload picture error:', error.message);
-    res.status(500).json({ error: 'Upload failed' });
   }
 });
 

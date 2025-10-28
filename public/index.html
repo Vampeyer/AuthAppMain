@@ -67,10 +67,9 @@
 
   <script src="/protected/js/auth.js"></script>
   <script>
-    let isChecking = false; // Prevent multiple calls
-
+    let isChecking = false;
     async function checkSubscription() {
-      if (isChecking) return; // Skip if already checking
+      if (isChecking) return;
       isChecking = true;
       try {
         console.log('Checking subscription status');
