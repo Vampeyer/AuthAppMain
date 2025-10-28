@@ -2,10 +2,10 @@
 const mysql = require('mysql2/promise');
 
 const dbConfig = { 
-  host: 'srv1267.hstgr.io', 
-  user: 'u418580423_rootie', 
-  password: '0Idontknow0$%$%', 
-  database: 'u418580423_scm_system',
+  host: '', 
+  user: '', 
+  password: '', 
+  database: '',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
