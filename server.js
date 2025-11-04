@@ -27,7 +27,8 @@ const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onre
 // Middleware setup
 app.use(cookieParser());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app', 'https://spauth.techsport.app'],
+  origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app',
+     'https://techsport.app/streampaltest'],
   credentials: true
 }));
 
@@ -114,10 +115,7 @@ app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 
 // Other middleware
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+
 
 // MySQL setup
 const dbConfig = {
