@@ -1,6 +1,6 @@
 // server.js
 // ===============================================
-// FULL SERVER – STRIPE RETRY FIXED + EVERYTHING ELSE
+// SUBSCRIPTION ACTIVATES AFTER CHECKOUT (WEBHOOK + FALLBACK)
 // ===============================================
 
 require('dotenv').config();
@@ -14,15 +14,15 @@ const path = require('path');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
-// ---------- CLEAN STRIPE KEY ----------
+// ---------- STRIPE ----------
 let rawKey = process.env.STRIPE_SECRET_KEY || '';
-rawKey = rawKey.trim().replace(/[' "]/g, '');
+rawKey = rawKey.trim().replace(/[' "\r\n]/g, '');
 if (!rawKey) throw new Error('STRIPE_SECRET_KEY missing');
 console.log('[STRIPE] key (first 10):', rawKey.substring(0, 10) + '...');
 
-// ---------- STRIPE CLIENT – NO RETRIES ----------
 const stripe = require('stripe')(rawKey, {
-  maxNetworkRetries: 0,               // <-- FIX: stops the retry loop that crashes on Render
+  apiVersion: '2023-10-16',
+  maxNetworkRetries: 0,
   timeout: 10000
 });
 
@@ -47,9 +47,63 @@ app.use(cors({
 app.use(cookieParser());
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
+
+// ---------- WEBHOOK (MUST BE RAW + BEFORE STATIC) ----------
+app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    console.log(`[webhook] EVENT: ${event.type} | ID: ${event.id}`);
+  } catch (err) {
+    console.error(`[webhook] ⚠️ Signature failed: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle subscription created
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const userId = session.metadata?.userId;
+    const subId = session.subscription;
+    const custId = session.customer;
+
+    if (userId && subId && session.payment_status === 'paid') {
+      try {
+        await pool.execute(
+          `UPDATE users 
+           SET customer_id = ?, subscription_id = ?, subscription_active = TRUE 
+           WHERE id = ?`,
+          [custId, subId, userId]
+        );
+        console.log(`[webhook] SUBSCRIPTION ACTIVATED | user: ${userId} | sub: ${subId}`);
+      } catch (e) {
+        console.error('[webhook] DB update failed:', e.message);
+      }
+    }
+  }
+
+  // Handle cancel
+  if (event.type === 'customer.subscription.deleted') {
+    const sub = event.data.object;
+    try {
+      await pool.execute(
+        `UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE subscription_id = ?`,
+        [sub.id]
+      );
+      console.log(`[webhook] SUBSCRIPTION CANCELLED | sub: ${sub.id}`);
+    } catch (e) {
+      console.error('[webhook] Cancel failed:', e.message);
+    }
+  }
+
+  res.json({ received: true });
+});
+
+// ---------- STATIC FILES (AFTER WEBHOOK) ----------
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ---------- MYSQL POOL ----------
+// ---------- MYSQL ----------
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST,
   user: process.env.MYSQL_USER,
@@ -61,7 +115,17 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
-// ---------- JWT HELPERS ----------
+// Auto-add columns if missing
+(async () => {
+  try {
+    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(255)`);
+    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR(255)`);
+    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT FALSE`);
+    console.log('[DB] Schema updated');
+  } catch (e) { console.error('[DB] Schema error:', e.message); }
+})();
+
+// ---------- JWT ----------
 function verifyTokenOptional(req, res, next) {
   const token = req.cookies.authToken;
   if (!token) { req.userId = null; return next(); }
@@ -83,13 +147,12 @@ async function verifyTokenRequired(req, res, next) {
 }
 
 // ---------- MNEMONIC ----------
-const wordList = ['apple','banana','cat','dog','elephant','fox','grape','horse','ice','jungle','kiwi','lemon',
-                  'monkey','nut','orange','pear','queen','rabbit','snake','tiger','umbrella','violet',
-                  'whale','xray','yellow','zebra'];
-
 function generateMnemonic() {
+  const list = ['apple','banana','cat','dog','elephant','fox','grape','horse','ice','jungle','kiwi','lemon',
+                'monkey','nut','orange','pear','queen','rabbit','snake','tiger','umbrella','violet',
+                'whale','xray','yellow','zebra'];
   const words = [];
-  for (let i = 0; i < 12; i++) words.push(wordList[Math.floor(Math.random() * wordList.length)]);
+  for (let i = 0; i < 12; i++) words.push(list[Math.floor(Math.random() * list.length)]);
   return words.join(' ');
 }
 
@@ -110,28 +173,6 @@ async function checkSubscription(req, res, next) {
 }
 app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
 
-// ---------- WEBHOOK ----------
-app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-  try { event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET); }
-  catch (e) { return res.status(400).send(`Webhook Error: ${e.message}`); }
-
-  if (event.type === 'checkout.session.completed') {
-    const s = event.data.object;
-    if (s.mode === 'subscription' && s.subscription && s.metadata.userId) {
-      await pool.execute(
-        'UPDATE users SET customer_id=?, subscription_id=?, subscription_active=TRUE WHERE id=?',
-        [s.customer, s.subscription, s.metadata.userId]
-      );
-    }
-  } else if (['customer.subscription.deleted','customer.subscription.canceled'].includes(event.type)) {
-    const sub = event.data.object;
-    await pool.execute('UPDATE users SET subscription_id=NULL, subscription_active=FALSE WHERE subscription_id=?', [sub.id]);
-  }
-  res.json({ received: true });
-});
-
 // ---------- SIGNUP ----------
 app.post('/signup', async (req, res) => {
   const { username, email, password } = req.body;
@@ -151,7 +192,10 @@ app.post('/signup', async (req, res) => {
     const token = jwt.sign({ id: result.insertId }, JWT_SECRET, { expiresIn: '7d' });
     res.cookie('authToken', token, { httpOnly:true, secure:IS_PROD, sameSite:'strict', maxAge:7*24*60*60*1000 });
     res.json({ success:true, mnemonic });
-  } catch (e) { res.status(500).json({ error: 'Signup failed' }); }
+  } catch (e) { 
+    console.error('[signup] error:', e.message);
+    res.status(500).json({ error: 'Signup failed' }); 
+  }
 });
 
 // ---------- LOGIN ----------
@@ -170,7 +214,10 @@ app.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
     res.cookie('authToken', token, { httpOnly:true, secure:IS_PROD, sameSite:'strict', maxAge:7*24*60*60*1000 });
     res.json({ success:true });
-  } catch (e) { res.status(500).json({ error: 'Login failed' }); }
+  } catch (e) { 
+    console.error('[login] error:', e.message);
+    res.status(500).json({ error: 'Login failed' }); 
+  }
 });
 
 // ---------- PROFILE ----------
@@ -188,28 +235,33 @@ app.get('/profile', verifyTokenOptional, async (req, res) => {
       email:u.email,
       subscription_active: !!u.subscription_active
     });
-  } catch (e) { res.status(500).json({ error:'Profile load failed' }); }
+  } catch (e) { 
+    console.error('[profile] error:', e.message);
+    res.status(500).json({ error:'Profile load failed' }); 
+  }
 });
 
 // ---------- PRICES ----------
 const PRICES = {
-  WEEKLY:  { id:'price_1SIBPkFF2HALdyFkogiGJG5w', amount:295, label:'$2.95 / week' },
-  MONTHLY: { id:'price_1SIBCzFF2HALdyFk7vOxByGq', amount:775, label:'$7.75 / month' }
+  WEEKLY:  { id: 'price_1SIBPkFF2HALdyFkogiGJG5w', amount: 295, label: '$2.95 / week' },
+  MONTHLY: { id: 'price_1SIBCzFF2HALdyFk7vOxByGq', amount: 775, label: '$7.75 / month' }
 };
 
 // ---------- CHECKOUT ----------
 app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   const { type } = req.body;
   const price = PRICES[type.toUpperCase()];
-  if (!price) return res.status(400).json({ error:'Invalid type' });
+  if (!price) return res.status(400).json({ error: 'Invalid type' });
 
   try {
+    await stripe.prices.retrieve(price.id);  // validate
+
     const [rows] = await pool.execute('SELECT customer_id,email FROM users WHERE id=?', [req.userId]);
-    if (!rows.length) return res.status(404).json({ error:'User not found' });
+    if (!rows.length) return res.status(404).json({ error: 'User not found' });
 
     let customerId = rows[0].customer_id;
     if (!customerId) {
-      const cust = await stripe.customers.create({ email:rows[0].email });
+      const cust = await stripe.customers.create({ email: rows[0].email });
       customerId = cust.id;
       await pool.execute('UPDATE users SET customer_id=? WHERE id=?', [customerId, req.userId]);
     }
@@ -218,17 +270,48 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
       customer: customerId,
       mode: 'subscription',
       payment_method_types: ['card'],
-      line_items: [{ price:price.id, quantity:1 }],
+      line_items: [{ price: price.id, quantity: 1 }],
       success_url: `${DOMAIN}/success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${DOMAIN}/cancel.html`,
       metadata: { userId: req.userId.toString() }
     });
 
-    console.log('[checkout] created:', session.id, session.url);
+    console.log(`[checkout] created: ${session.id}`);
     res.json({ url: session.url });
   } catch (e) {
     console.error('[checkout] error:', e.message);
-    res.status(500).json({ error:'Checkout failed' });
+    res.status(500).json({ error: 'Checkout failed' });
+  }
+});
+
+// ---------- VERIFY SESSION (FALLBACK FROM SUCCESS PAGE) ----------
+app.post('/verify-session', verifyTokenRequired, async (req, res) => {
+  const { session_id } = req.body;
+  if (!session_id) return res.status(400).json({ error: 'Missing session_id' });
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(session_id, {
+      expand: ['subscription']
+    });
+
+    if (session.payment_status !== 'paid' || !session.subscription) {
+      return res.status(400).json({ error: 'Payment not completed' });
+    }
+
+    const subId = typeof session.subscription === 'object' ? session.subscription.id : session.subscription;
+
+    await pool.execute(
+      `UPDATE users 
+       SET subscription_id = ?, subscription_active = TRUE 
+       WHERE id = ? AND (subscription_id IS NULL OR subscription_id != ?)`,
+      [subId, req.userId, subId]
+    );
+
+    console.log(`[verify-session] FALLBACK ACTIVATED | user: ${req.userId} | sub: ${subId}`);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[verify-session] error:', e.message);
+    res.status(500).json({ error: 'Verification failed' });
   }
 });
 
@@ -237,26 +320,28 @@ app.post('/delete-subscription', verifyTokenRequired, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT subscription_id FROM users WHERE id=?', [req.userId]);
     const subId = rows[0]?.subscription_id;
-    if (!subId) return res.status(400).json({ error:'No subscription' });
+    if (!subId) return res.status(400).json({ error: 'No subscription' });
 
     await stripe.subscriptions.cancel(subId);
     await pool.execute('UPDATE users SET subscription_id=NULL, subscription_active=FALSE WHERE id=?', [req.userId]);
-    res.json({ success:true });
-  } catch (e) { res.status(500).json({ error:'Cancel failed' }); }
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[cancel] error:', e.message);
+    res.status(500).json({ error: 'Cancel failed' });
+  }
 });
 
 // ---------- LOGOUT ----------
 app.post('/logout', (req, res) => {
   res.clearCookie('authToken', { path:'/', sameSite:'strict', secure:IS_PROD });
-  res.json({ success:true });
+  res.json({ success: true });
 });
 
 // ---------- START ----------
-(async () => {
+app.listen(PORT, async () => {
   try {
     await pool.getConnection();
     console.log('MySQL connected');
   } catch (e) { console.error('MySQL error:', e.message); }
-
-  app.listen(PORT, () => console.log(`Server listening on ${PORT} – DOMAIN: ${DOMAIN}`));
-})();
+  console.log(`Server on ${PORT} | DOMAIN: ${DOMAIN}`);
+});
