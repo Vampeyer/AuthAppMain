@@ -54,30 +54,25 @@
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
   <script src="/protected/js/auth.js"></script>
   <script>
-    console.log('[profile.html] Page loaded, API_URL (initial):', API_URL);
-
     async function loadProfile(retry = 0) {
-      console.log(`[loadProfile] Attempt ${retry + 1}`);
       const container = document.getElementById('profileContent');
 
       try {
         const data = await API.loadProfile();
-        console.log('[loadProfile] API response:', data);
 
         if (!data.loggedIn) {
           if (retry < 2) {
-            console.log('[loadProfile] Not logged in – retrying...');
             setTimeout(() => loadProfile(retry + 1), 600);
             return;
           }
-          container.innerHTML = `<h1 class="display-4 mb-4">Not logged in</h1><p class="lead">Please <a href="/login.html" style="color:#ffc107;">log in</a>.</p>`;
+          container.innerHTML = `<h1>Not logged in</h1><p><a href="/login.html">Log in</a></p>`;
           return;
         }
 
         container.innerHTML = `
-          <h1 class="display-4 mb-4">User Profile</h1>
-          <p><strong>Username:</strong> <span id="username">${data.username}</span></p>
-          <p><strong>Email:</strong> <span id="email">${data.email}</span></p>
+          <h1>User Profile</h1>
+          <p><strong>Username:</strong> ${data.username}</p>
+          <p><strong>Email:</strong> ${data.email}</p>
           <p><strong>Subscription:</strong> 
             <span class="status-badge ${data.subscription_active ? 'green' : 'red'}">
               ${data.subscription_active ? 'Active' : 'Inactive'}
@@ -87,14 +82,14 @@
           <div class="row mt-5 g-4">
             <div class="col-md-6">
               <div class="price-card">
-                <div class="price">$4.99</div>
+                <div class="price">$2.95</div>
                 <div class="period">per week</div>
                 <button id="subscribeWeeklyBtn" class="btn btn-subscribe mt-3" ${data.subscription_active ? 'disabled' : ''}>Subscribe Weekly</button>
               </div>
             </div>
             <div class="col-md-6">
               <div class="price-card">
-                <div class="price">$14.99</div>
+                <div class="price">$7.75</div>
                 <div class="period">per month</div>
                 <button id="subscribeMonthlyBtn" class="btn btn-subscribe mt-3" ${data.subscription_active ? 'disabled' : ''}>Subscribe Monthly</button>
               </div>
@@ -102,7 +97,7 @@
           </div>
 
           <div class="mt-4 text-center">
-            <button id="cancelSubscriptionBtn" class="btn btn-danger me-2" ${data.subscription_active ? '' : 'disabled'}>Cancel Subscription</button>
+            <button id="cancelSubscriptionBtn" class="btn btn-danger me-2" ${data.subscription_active ? '' : 'disabled'}>Cancel</button>
             <button id="logoutBtn" class="btn btn-warning">Logout</button>
           </div>
         `;
@@ -113,8 +108,7 @@
         document.getElementById('logoutBtn')?.addEventListener('click', API.logout);
 
       } catch (err) {
-        console.error('[loadProfile] ERROR:', err);
-        container.innerHTML = `<p class="text-danger">Error loading profile.</p>`;
+        container.innerHTML = `<p class="text-danger">Error.</p>`;
       }
     }
 

@@ -1,6 +1,6 @@
 // server.js
 // ===============================================
-// FULL SERVER – CORS + FALLBACK + PRICES
+// FULL SERVER – CHECKOUT + SUBSCRIPTION FOLDER PROTECTION
 // ===============================================
 
 require('dotenv').config();
@@ -20,7 +20,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 // ===============================================
-// CONFIG – EDIT ONLY THIS BLOCK
+// CONFIG
 // ===============================================
 const CONFIG = {
   RENDER_ORIGIN: 'https://authappmain.onrender.com',
@@ -32,7 +32,7 @@ const CONFIG = {
 
 const allowedOrigins = [
   CONFIG.RENDER_ORIGIN,
-  CONFIG.LIVE_SERVER_ORIGIN,   // ← LIVE SERVER
+  CONFIG.LIVE_SERVER_ORIGIN,
   CONFIG.DEV_SERVER_ORIGIN,
   CONFIG.PROD_ORIGIN
 ];
@@ -40,11 +40,10 @@ const allowedOrigins = [
 let DOMAIN = CONFIG.STRIPE_DOMAIN;
 
 // ===============================================
-// CORS – allow Live Server
+// CORS
 // ===============================================
 app.use(cors({
   origin: function (origin, callback) {
-    console.log('[CORS] Request from origin:', origin);
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -60,6 +59,8 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// Serve public files
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ===============================================
@@ -77,7 +78,23 @@ const pool = mysql.createPool({
 });
 
 // ===============================================
-// JWT OPTIONAL
+// JWT VERIFY (required for protected routes)
+// ===============================================
+async function verifyTokenRequired(req, res, next) {
+  const token = req.cookies.authToken;
+  if (!token) return res.status(401).json({ error: 'Login required' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.id;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+// ===============================================
+// JWT OPTIONAL (for /profile)
 // ===============================================
 function verifyTokenOptional(req, res, next) {
   const token = req.cookies.authToken;
@@ -173,31 +190,27 @@ app.get('/profile', verifyTokenOptional, async (req, res) => {
 });
 
 // ===============================================
-// PRICES
+// PRICES – CHANGE HERE
 // ===============================================
 const PRICES = {
   WEEKLY: {
-    id: 'price_1SIBPkFF2HALdyFkogiGJG5w',
-    amount: 499,
+    id: 'price_1SIBPkFF2HALdyFkogiGJG5w',   // ← REPLACE WITH REAL PRICE ID
+    amount: 295,                        // $2.95
     currency: 'usd',
-    label: '$4.99 / week'
+    label: '$2.95 / week'
   },
   MONTHLY: {
-    id: 'price_1SIBCzFF2HALdyFk7vOxByGq',
-    amount: 1499,
+    id: 'price_1SIBCzFF2HALdyFk7vOxByGq', // ← REPLACE WITH REAL PRICE ID
+    amount: 775,                        // $7.75
     currency: 'usd',
-    label: '$14.99 / month'
+    label: '$7.75 / month'
   }
 };
 
 // ===============================================
-// CREATE CHECKOUT SESSION
+// CREATE CHECKOUT SESSION – FIXED
 // ===============================================
-app.post('/create-checkout-session', verifyTokenOptional, async (req, res) => {
-  if (!req.userId) {
-    return res.status(401).json({ error: 'Login required' });
-  }
-
+app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   const { type } = req.body;
   const price = PRICES[type.toUpperCase()];
 
@@ -235,8 +248,38 @@ app.post('/create-checkout-session', verifyTokenOptional, async (req, res) => {
 
     res.json({ url: session.url });
   } catch (error) {
-    console.error('Checkout error:', error.message);
+    console.error('Checkout error:', error);
     res.status(500).json({ error: 'Checkout failed' });
+  }
+});
+
+// ===============================================
+// PROTECT /subscription/* FOLDER
+// ===============================================
+app.use('/subscription', verifyTokenRequired, async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT subscription_active FROM users WHERE id = ?',
+      [req.userId]
+    );
+
+    if (rows.length === 0 || rows[0].subscription_active !== 1) {
+      return res.status(403).send(`
+        <h1>Access Denied</h1>
+        <p>You need an active subscription to view this content.</p>
+        <a href="/profile.html">Go to Profile</a>
+      `);
+    }
+
+    // Serve the file from /public/subscription
+    const filePath = path.join(__dirname, 'public', 'subscription', req.path === '/' ? 'index.html' : req.path);
+    res.sendFile(filePath, err => {
+      if (err) {
+        res.status(404).send('File not found');
+      }
+    });
+  } catch (error) {
+    res.status(500).send('Server error');
   }
 });
 
