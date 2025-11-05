@@ -1,6 +1,6 @@
 // server.js
 // ===============================================
-// FULL SERVER – ALL FUNCTIONS DEFINED + 500 FIXED
+// FULL SERVER – STRIPE RETRY FIXED + EVERYTHING ELSE
 // ===============================================
 
 require('dotenv').config();
@@ -16,12 +16,16 @@ const cookieParser = require('cookie-parser');
 
 // ---------- CLEAN STRIPE KEY ----------
 let rawKey = process.env.STRIPE_SECRET_KEY || '';
-rawKey = rawKey.trim().replace(/[' "]/g, '');   // remove spaces / quotes
+rawKey = rawKey.trim().replace(/[' "]/g, '');
 if (!rawKey) throw new Error('STRIPE_SECRET_KEY missing');
 console.log('[STRIPE] key (first 10):', rawKey.substring(0, 10) + '...');
-const stripe = require('stripe')(rawKey);
 
-// ---------- APP & CONFIG ----------
+// ---------- STRIPE CLIENT – NO RETRIES ----------
+const stripe = require('stripe')(rawKey, {
+  maxNetworkRetries: 0,               // <-- FIX: stops the retry loop that crashes on Render
+  timeout: 10000
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret123!@#';
@@ -60,34 +64,25 @@ const pool = mysql.createPool({
 // ---------- JWT HELPERS ----------
 function verifyTokenOptional(req, res, next) {
   const token = req.cookies.authToken;
-  if (!token) {
-    req.userId = null;
-    return next();
-  }
+  if (!token) { req.userId = null; return next(); }
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.id;
     next();
-  } catch (e) {
-    req.userId = null;
-    next();
-  }
+  } catch (e) { req.userId = null; next(); }
 }
 
 async function verifyTokenRequired(req, res, next) {
   const token = req.cookies.authToken;
   if (!token) return res.status(401).json({ error: 'Login required' });
-
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.id;
     next();
-  } catch (e) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
+  } catch (e) { return res.status(401).json({ error: 'Invalid token' }); }
 }
 
-// ---------- WORD LIST & MNEMONIC ----------
+// ---------- MNEMONIC ----------
 const wordList = ['apple','banana','cat','dog','elephant','fox','grape','horse','ice','jungle','kiwi','lemon',
                   'monkey','nut','orange','pear','queen','rabbit','snake','tiger','umbrella','violet',
                   'whale','xray','yellow','zebra'];
@@ -98,11 +93,10 @@ function generateMnemonic() {
   return words.join(' ');
 }
 
-// ---------- SUBSCRIPTION FOLDER PROTECTION ----------
+// ---------- SUBSCRIPTION FOLDER ----------
 async function checkSubscription(req, res, next) {
   const token = req.cookies.authToken;
   if (!token) return res.status(403).send(`<script>alert('Subscribe to access premium content.');location='/profile.html';</script>`);
-
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const [rows] = await pool.execute('SELECT subscription_active FROM users WHERE id = ?', [decoded.id]);
@@ -116,7 +110,7 @@ async function checkSubscription(req, res, next) {
 }
 app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
 
-// ---------- STRIPE WEBHOOK ----------
+// ---------- WEBHOOK ----------
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -138,7 +132,7 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
   res.json({ received: true });
 });
 
-// ---------- SIGNUP (phrase generated on server) ----------
+// ---------- SIGNUP ----------
 app.post('/signup', async (req, res) => {
   const { username, email, password } = req.body;
   if (!username || !email || !password) return res.status(400).json({ error: 'All fields required' });
@@ -197,13 +191,13 @@ app.get('/profile', verifyTokenOptional, async (req, res) => {
   } catch (e) { res.status(500).json({ error:'Profile load failed' }); }
 });
 
-// ---------- PRICE IDs ----------
+// ---------- PRICES ----------
 const PRICES = {
   WEEKLY:  { id:'price_1SIBPkFF2HALdyFkogiGJG5w', amount:295, label:'$2.95 / week' },
   MONTHLY: { id:'price_1SIBCzFF2HALdyFk7vOxByGq', amount:775, label:'$7.75 / month' }
 };
 
-// ---------- CREATE CHECKOUT SESSION ----------
+// ---------- CHECKOUT ----------
 app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   const { type } = req.body;
   const price = PRICES[type.toUpperCase()];
@@ -238,7 +232,7 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   }
 });
 
-// ---------- CANCEL SUBSCRIPTION ----------
+// ---------- CANCEL ----------
 app.post('/delete-subscription', verifyTokenRequired, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT subscription_id FROM users WHERE id=?', [req.userId]);
@@ -257,7 +251,7 @@ app.post('/logout', (req, res) => {
   res.json({ success:true });
 });
 
-// ---------- START SERVER ----------
+// ---------- START ----------
 (async () => {
   try {
     await pool.getConnection();
