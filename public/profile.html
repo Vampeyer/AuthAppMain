@@ -17,7 +17,7 @@
     .price { font-size: 1.8rem; font-weight: 700; }
     .period { font-size: 1rem; opacity: 0.8; }
     .btn-subscribe { background: #667eea; color: white; border: none; border-radius: 50px; padding: 12px 30px; font-weight: 600; }
-    .btn-subscribe:disabled { background: #555; }
+    .btn-subscribe:disabled { background: #555; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -102,13 +102,17 @@
           </div>
         `;
 
-        document.getElementById('subscribeWeeklyBtn')?.addEventListener('click', () => API.subscribe('WEEKLY'));
-        document.getElementById('subscribeMonthlyBtn')?.addEventListener('click', () => API.subscribe('MONTHLY'));
+        const weeklyBtn = document.getElementById('subscribeWeeklyBtn');
+        const monthlyBtn = document.getElementById('subscribeMonthlyBtn');
+
+        if (weeklyBtn) weeklyBtn.addEventListener('click', () => API.subscribe('WEEKLY'));
+        if (monthlyBtn) monthlyBtn.addEventListener('click', () => API.subscribe('MONTHLY'));
         document.getElementById('cancelSubscriptionBtn')?.addEventListener('click', API.cancelSubscription);
         document.getElementById('logoutBtn')?.addEventListener('click', API.logout);
 
       } catch (err) {
-        container.innerHTML = `<p class="text-danger">Error.</p>`;
+        console.error('[loadProfile] Error:', err);
+        container.innerHTML = `<p class="text-danger">Error loading profile.</p>`;
       }
     }
 

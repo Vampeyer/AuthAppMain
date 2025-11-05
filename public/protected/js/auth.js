@@ -32,7 +32,7 @@ async function testAPI(url) {
     });
     attachInterceptors();
   }
-  console.log('[auth.js] API_URL:', API_URL);
+  console.log('[auth.js] Final API_URL:', API_URL);
   window.API_URL = API_URL;
 })();
 
@@ -47,7 +47,7 @@ function attachInterceptors() {
       return res;
     },
     err => {
-      console.error('[axios] ← ERROR', err.response?.status, err.config?.url);
+      console.error('[axios] ← ERROR', err.response?.status, err.config?.url, err.message);
       return Promise.reject(err);
     }
   );
@@ -72,11 +72,19 @@ window.API = {
   },
 
   async subscribe(type) {
+    console.log(`[API.subscribe] Starting checkout for ${type}`);
     try {
       const r = await api.post('/create-checkout-session', { type });
-      if (r.data.url) location.href = r.data.url;
+      console.log('[API.subscribe] Response:', r.data);
+      if (r.data.url) {
+        console.log('[API.subscribe] Redirecting to Stripe:', r.data.url);
+        window.location.href = r.data.url;  // ← FORCED REDIRECT
+      } else {
+        alert('No URL returned');
+      }
     } catch (e) {
-      alert('Checkout failed');
+      console.error('[API.subscribe] Failed:', e.response?.data || e.message);
+      alert('Checkout failed – check console');
     }
   },
 

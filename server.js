@@ -1,6 +1,6 @@
 // server.js
 // ===============================================
-// FULL SERVER – CHECKOUT + SUBSCRIPTION FOLDER PROTECTION
+// FULL SERVER – CHECKOUT 500 FIXED + DEBUG LOGS
 // ===============================================
 
 require('dotenv').config();
@@ -44,6 +44,7 @@ let DOMAIN = CONFIG.STRIPE_DOMAIN;
 // ===============================================
 app.use(cors({
   origin: function (origin, callback) {
+    console.log('[CORS] Request from origin:', origin);
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -59,8 +60,6 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
-
-// Serve public files
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ===============================================
@@ -78,23 +77,28 @@ const pool = mysql.createPool({
 });
 
 // ===============================================
-// JWT VERIFY (required for protected routes)
+// JWT REQUIRED
 // ===============================================
 async function verifyTokenRequired(req, res, next) {
   const token = req.cookies.authToken;
-  if (!token) return res.status(401).json({ error: 'Login required' });
+  if (!token) {
+    console.log('[verifyTokenRequired] No token');
+    return res.status(401).json({ error: 'Login required' });
+  }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.id;
+    console.log('[verifyTokenRequired] Valid token, userId:', req.userId);
     next();
   } catch (error) {
+    console.log('[verifyTokenRequired] Invalid token');
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
 
 // ===============================================
-// JWT OPTIONAL (for /profile)
+// JWT OPTIONAL
 // ===============================================
 function verifyTokenOptional(req, res, next) {
   const token = req.cookies.authToken;
@@ -130,6 +134,7 @@ function getCookieOptions() {
 // ===============================================
 app.post('/login', async (req, res) => {
   const { login, password, mnemonic } = req.body;
+  console.log('[login] Attempt:', { login, mnemonic });
   if (!login || !password || !mnemonic) {
     return res.status(400).json({ error: 'All fields required' });
   }
@@ -153,8 +158,10 @@ app.post('/login', async (req, res) => {
 
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
     res.cookie('authToken', token, getCookieOptions());
+    console.log('[login] Success for user:', user.id);
     res.json({ success: true });
   } catch (error) {
+    console.error('[login] Error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -164,6 +171,7 @@ app.post('/login', async (req, res) => {
 // ===============================================
 app.get('/profile', verifyTokenOptional, async (req, res) => {
   if (!req.userId) {
+    console.log('[profile] No user');
     return res.json({ loggedIn: false });
   }
 
@@ -178,6 +186,7 @@ app.get('/profile', verifyTokenOptional, async (req, res) => {
     }
 
     const user = rows[0];
+    console.log('[profile] User data:', user);
     res.json({
       loggedIn: true,
       username: user.username,
@@ -185,36 +194,41 @@ app.get('/profile', verifyTokenOptional, async (req, res) => {
       subscription_active: user.subscription_active === 1
     });
   } catch (error) {
+    console.error('[profile] Error:', error);
     res.status(500).json({ error: 'Failed to load profile' });
   }
 });
 
 // ===============================================
-// PRICES – CHANGE HERE
+// PRICES – $2.95/week, $7.75/month
 // ===============================================
 const PRICES = {
   WEEKLY: {
-    id: 'price_1SIBPkFF2HALdyFkogiGJG5w',   // ← REPLACE WITH REAL PRICE ID
-    amount: 295,                        // $2.95
+    id: 'price_1SIBPkFF2HALdyFkogiGJG5w',
+    amount: 295,
     currency: 'usd',
     label: '$2.95 / week'
   },
   MONTHLY: {
-    id: 'price_1SIBCzFF2HALdyFk7vOxByGq', // ← REPLACE WITH REAL PRICE ID
-    amount: 775,                        // $7.75
+    id: 'price_1SIBCzFF2HALdyFk7vOxByGq',
+    amount: 775,
     currency: 'usd',
     label: '$7.75 / month'
   }
 };
 
 // ===============================================
-// CREATE CHECKOUT SESSION – FIXED
+// CREATE CHECKOUT SESSION – FIXED + LOGS
 // ===============================================
 app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   const { type } = req.body;
-  const price = PRICES[type.toUpperCase()];
+  console.log('[create-checkout-session] Request:', { type, userId: req.userId });
+
+  const priceKey = type.toUpperCase();
+  const price = PRICES[priceKey];
 
   if (!price) {
+    console.error(`[create-checkout-session] Invalid type: ${type}`);
     return res.status(400).json({ error: 'Invalid subscription type' });
   }
 
@@ -225,6 +239,7 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
     );
 
     if (rows.length === 0) {
+      console.error('[create-checkout-session] User not found');
       return res.status(404).json({ error: 'User not found' });
     }
 
@@ -234,6 +249,7 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
       const customer = await stripe.customers.create({ email: rows[0].email });
       customerId = customer.id;
       await pool.execute('UPDATE users SET customer_id = ? WHERE id = ?', [customerId, req.userId]);
+      console.log('[create-checkout-session] Created Stripe customer:', customerId);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -246,10 +262,11 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
       metadata: { userId: req.userId.toString() }
     });
 
+    console.log('[create-checkout-session] Session created:', session.id, 'URL:', session.url);
     res.json({ url: session.url });
   } catch (error) {
-    console.error('Checkout error:', error);
-    res.status(500).json({ error: 'Checkout failed' });
+    console.error('[create-checkout-session] STRIPE ERROR:', error.type, error.message, error);
+    res.status(500).json({ error: 'Checkout failed – see server logs' });
   }
 });
 
@@ -264,21 +281,23 @@ app.use('/subscription', verifyTokenRequired, async (req, res, next) => {
     );
 
     if (rows.length === 0 || rows[0].subscription_active !== 1) {
+      console.log('[subscription] Access denied for user:', req.userId);
       return res.status(403).send(`
         <h1>Access Denied</h1>
-        <p>You need an active subscription to view this content.</p>
+        <p>You need an active subscription.</p>
         <a href="/profile.html">Go to Profile</a>
       `);
     }
 
-    // Serve the file from /public/subscription
     const filePath = path.join(__dirname, 'public', 'subscription', req.path === '/' ? 'index.html' : req.path);
     res.sendFile(filePath, err => {
       if (err) {
+        console.log('[subscription] File not found:', req.path);
         res.status(404).send('File not found');
       }
     });
   } catch (error) {
+    console.error('[subscription] Error:', error);
     res.status(500).send('Server error');
   }
 });
@@ -288,6 +307,7 @@ app.use('/subscription', verifyTokenRequired, async (req, res, next) => {
 // ===============================================
 app.post('/logout', (req, res) => {
   res.clearCookie('authToken', { path: '/', sameSite: 'none', secure: true });
+  console.log('[logout] User logged out');
   res.json({ success: true });
 });
 
