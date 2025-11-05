@@ -13,19 +13,13 @@
 </head>
 <body>
   <div class="container">
-    <h1 class="text-success">Activating Subscription...</h1>
+    <h1 class="text-success">Activating...</h1>
     <div class="spinner"></div>
-    <p>Please wait...</p>
   </div>
 
   <script>
-    const params = new URLSearchParams(location.search);
-    const sessionId = params.get('session_id');
-
-    if (!sessionId) {
-      alert('Error: No session ID');
-      location.href = '/profile.html';
-    }
+    const sessionId = new URLSearchParams(location.search).get('session_id');
+    if (!sessionId) { alert('Error'); location.href = '/profile.html'; }
 
     fetch('/verify-session', {
       method: 'POST',
@@ -34,17 +28,12 @@
       body: JSON.stringify({ session_id: sessionId })
     })
     .then(r => r.json())
-    .then(data => {
-      if (data.success) {
-        alert('Subscription Active!');
-      } else {
-        alert('Activation failed: ' + (data.error || 'Unknown'));
-      }
+    .then(d => {
+      alert(d.success ? 'Subscription Active!' : 'Failed: ' + (d.error || ''));
       location.href = '/profile.html';
     })
-    .catch(err => {
-      console.error(err);
-      alert('Network error – redirecting');
+    .catch(() => {
+      alert('Network error');
       location.href = '/profile.html';
     });
   </script>

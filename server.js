@@ -1,6 +1,6 @@
 // server.js
 // ===============================================
-// SUBSCRIPTION ACTIVATES AFTER CHECKOUT (WEBHOOK + FALLBACK)
+// LOGIN + SIGNUP + SUBSCRIPTION (NO WEBHOOK)
 // ===============================================
 
 require('dotenv').config();
@@ -47,61 +47,7 @@ app.use(cors({
 app.use(cookieParser());
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
-
-// ---------- WEBHOOK (MUST BE RAW + BEFORE STATIC) ----------
-app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    console.log(`[webhook] EVENT: ${event.type} | ID: ${event.id}`);
-  } catch (err) {
-    console.error(`[webhook] ⚠️ Signature failed: ${err.message}`);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Handle subscription created
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const userId = session.metadata?.userId;
-    const subId = session.subscription;
-    const custId = session.customer;
-
-    if (userId && subId && session.payment_status === 'paid') {
-      try {
-        await pool.execute(
-          `UPDATE users 
-           SET customer_id = ?, subscription_id = ?, subscription_active = TRUE 
-           WHERE id = ?`,
-          [custId, subId, userId]
-        );
-        console.log(`[webhook] SUBSCRIPTION ACTIVATED | user: ${userId} | sub: ${subId}`);
-      } catch (e) {
-        console.error('[webhook] DB update failed:', e.message);
-      }
-    }
-  }
-
-  // Handle cancel
-  if (event.type === 'customer.subscription.deleted') {
-    const sub = event.data.object;
-    try {
-      await pool.execute(
-        `UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE subscription_id = ?`,
-        [sub.id]
-      );
-      console.log(`[webhook] SUBSCRIPTION CANCELLED | sub: ${sub.id}`);
-    } catch (e) {
-      console.error('[webhook] Cancel failed:', e.message);
-    }
-  }
-
-  res.json({ received: true });
-});
-
-// ---------- STATIC FILES (AFTER WEBHOOK) ----------
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public')));  // AFTER ALL ROUTES
 
 // ---------- MYSQL ----------
 const pool = mysql.createPool({
@@ -115,13 +61,13 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
-// Auto-add columns if missing
+// Auto-add columns
 (async () => {
   try {
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(255)`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR(255)`);
     await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT FALSE`);
-    console.log('[DB] Schema updated');
+    console.log('[DB] Schema ready');
   } catch (e) { console.error('[DB] Schema error:', e.message); }
 })();
 
@@ -254,7 +200,7 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   if (!price) return res.status(400).json({ error: 'Invalid type' });
 
   try {
-    await stripe.prices.retrieve(price.id);  // validate
+    await stripe.prices.retrieve(price.id);
 
     const [rows] = await pool.execute('SELECT customer_id,email FROM users WHERE id=?', [req.userId]);
     if (!rows.length) return res.status(404).json({ error: 'User not found' });
@@ -284,34 +230,29 @@ app.post('/create-checkout-session', verifyTokenRequired, async (req, res) => {
   }
 });
 
-// ---------- VERIFY SESSION (FALLBACK FROM SUCCESS PAGE) ----------
+// ---------- VERIFY SESSION (FALLBACK) ----------
 app.post('/verify-session', verifyTokenRequired, async (req, res) => {
   const { session_id } = req.body;
-  if (!session_id) return res.status(400).json({ error: 'Missing session_id' });
+  if (!session_id) return res.status(400).json({ error: 'No session_id' });
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(session_id, {
-      expand: ['subscription']
-    });
-
+    const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
     if (session.payment_status !== 'paid' || !session.subscription) {
-      return res.status(400).json({ error: 'Payment not completed' });
+      return res.status(400).json({ error: 'Not paid' });
     }
 
     const subId = typeof session.subscription === 'object' ? session.subscription.id : session.subscription;
 
     await pool.execute(
-      `UPDATE users 
-       SET subscription_id = ?, subscription_active = TRUE 
-       WHERE id = ? AND (subscription_id IS NULL OR subscription_id != ?)`,
-      [subId, req.userId, subId]
+      `UPDATE users SET subscription_id = ?, subscription_active = TRUE WHERE id = ?`,
+      [subId, req.userId]
     );
 
-    console.log(`[verify-session] FALLBACK ACTIVATED | user: ${req.userId} | sub: ${subId}`);
+    console.log(`[verify] SUBSCRIPTION ACTIVATED | user: ${req.userId} | sub: ${subId}`);
     res.json({ success: true });
   } catch (e) {
-    console.error('[verify-session] error:', e.message);
-    res.status(500).json({ error: 'Verification failed' });
+    console.error('[verify] error:', e.message);
+    res.status(500).json({ error: 'Failed' });
   }
 });
 
