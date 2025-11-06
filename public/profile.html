@@ -77,8 +77,11 @@
         const response = await fetch(`${API_URL}/profile`, {
           credentials: 'include'
         });
+        console.log('Profile response:', response.status);
         const data = await response.json();
+        console.log('Profile data:', data);
         if (data.error) {
+          console.error('Profile error:', data.error);
           window.location.href = '/login.html';
           return;
         }
@@ -94,6 +97,7 @@
         document.getElementById('subscribeMonthlyBtn').disabled = data.subscription_active;
         document.getElementById('cancelSubscriptionBtn').disabled = !data.subscription_active;
       } catch (error) {
+        console.error('Load profile error:', error.message);
         window.location.href = '/login.html';
       }
     }
@@ -107,24 +111,29 @@
           credentials: 'include'
         });
         const data = await response.json();
+        console.log('Checkout response:', data);
         if (data.url) {
           window.location.href = data.url;
         } else {
           alert('Failed to start subscription: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
+        console.error('Subscription error:', error.message);
         alert('Failed to start subscription');
       }
     }
 
     async function deleteSubscription() {
-      if (!confirm('Are you sure you want to cancel your subscription?')) return;
+      if (!confirm('Are you sure you want to delete your subscription?')) {
+        return;
+      }
       try {
         const response = await fetch(`${API_URL}/delete-subscription`, {
           method: 'POST',
           credentials: 'include'
         });
         const data = await response.json();
+        console.log('Cancel subscription response:', data);
         if (data.success) {
           alert('Subscription cancelled successfully');
           loadProfile();
@@ -132,6 +141,7 @@
           alert('Failed to cancel subscription: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
+        console.error('Cancel subscription error:', error.message);
         alert('Failed to cancel subscription');
       }
     }
@@ -143,12 +153,14 @@
           credentials: 'include'
         });
         const data = await response.json();
+        console.log('Logout response:', data);
         if (data.success) {
           window.location.href = '/login.html';
         } else {
           alert('Failed to logout: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
+        console.error('Logout error:', error.message);
         alert('Failed to logout');
       }
     }

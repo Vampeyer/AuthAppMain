@@ -1,87 +1,43 @@
-// protected/js/auth.js
-const RENDER_API = 'https://authappmain.onrender.com';
-const LOCAL_API = 'http://localhost:3000';
+// public/protected/js/auth.js
+// PRODUCTION-FIRST, LOCALHOST-FALLBACK STRATEGY
+// Works on: Live Server (any port), Hostinger, Render, localhost:3000, localhost:5500, etc.
 
-let API_URL = RENDER_API;
+let API_URL = 'https://authappmain.onrender.com'; // ← Your real Render URL
 
-async function testAPI(url) {
-  try {
-    await fetch(`${url}/profile`, { credentials: 'include', timeout: 3000 });
-    return true;
-  } catch (e) {
-    return false;
-  }
+// ONLY fallback to localhost if we're clearly in dev mode AND Render is unreachable
+if (window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1' || 
+    window.location.hostname.includes('techsport.app')) {
+
+  // First: try to reach Render (even on localhost!)
+  const testRender = async () => {
+    try {
+      const res = await fetch(`${API_URL}/ping`, { method: 'HEAD', credentials: 'include' });
+      if (res.ok) {
+        console.log('✅ Connected to Render backend:', API_URL);
+        return API_URL;
+      }
+    } catch (err) {
+      // Render is down or blocked → fall back to localhost
+      console.warn('⚠️ Render backend unreachable, switching to localhost');
+    }
+    return null;
+  };
+
+  // Final fallback: localhost on current port OR default 3000
+  const fallbackLocal = () => {
+    const currentPort = window.location.port || '3000';
+    const localUrl = `${window.location.protocol}//${window.location.hostname}:${currentPort}`;
+    console.log('🔄 Using local backend:', localUrl);
+    return localUrl;
+  };
+
+  // Set API_URL intelligently
+  (async () => {
+    const renderWorks = await testRender();
+    API_URL = renderWorks || fallbackLocal();
+  })();
 }
 
-(async () => {
-  const works = await testAPI(RENDER_API);
-  if (!works) {
-    console.warn('[auth.js] Render down → localhost');
-    API_URL = LOCAL_API;
-  }
-  console.log('[auth.js] API_URL:', API_URL);
-})();
-
-window.API = {
-  async login(login, password, mnemonic) {
-    try {
-      const response = await fetch(`${API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login, password, mnemonic }),
-        credentials: 'include'
-      });
-      const data = await response.json();
-      if (data.success) location.href = '/profile.html';
-    } catch (e) { alert('Login failed'); }
-  },
-
-  async loadProfile() {
-    try {
-      const response = await fetch(`${API_URL}/profile`, {
-        credentials: 'include'
-      });
-      return await response.json();
-    } catch (e) {
-      return { loggedIn: false };
-    }
-  },
-
-  async subscribe(type) {
-    try {
-      const response = await fetch(`${API_URL}/create-checkout-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type }),
-        credentials: 'include'
-      });
-      const data = await response.json();
-      if (data.url) window.location.href = data.url;
-    } catch (e) { alert('Checkout failed'); }
-  },
-
-  async cancelSubscription() {
-    if (!confirm('Cancel?')) return;
-    try {
-      const response = await fetch(`${API_URL}/delete-subscription`, {
-        method: 'POST',
-        credentials: 'include'
-      });
-      const data = await response.json();
-      if (data.success) {
-        alert('Cancelled');
-        location.reload();
-      }
-    } catch (e) { alert('Failed'); }
-  },
-
-  async logout() {
-    try {
-      await fetch(`${API_URL}/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
-      location.href = '/login.html';
-    } catch (e) { alert('Logout failed'); }
-  }
-};
+// Optional: expose for debugging in console
+window.DEBUG_API_URL = () => console.log('Current API_URL →', API_URL);

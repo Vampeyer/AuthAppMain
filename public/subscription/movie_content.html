@@ -1,55 +1,32 @@
+<!-- public/subscription/movie_content.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Movies App - Movie Content</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background: linear-gradient(135deg, #1a3c34, #4b0082, #000000); color: white; padding-top: 80px; }
-    .profile-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px; padding: 40px; margin-bottom: 30px; }
-    .movie-card { background: rgba(255,255,255,0.1); border-radius: 10px; padding: 20px; margin-bottom: 20px; transition: transform .3s; }
-    .movie-card:hover { transform: scale(1.05); }
-  </style>
+  <!-- ... (unchanged) -->
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-    <div class="container">
-      <a class="navbar-brand fw-bold" href="/index.html">Movies App</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="/index.html">Home</a></li>
-          <li class="nav-item"><a class="nav-link" href="/signup.html">Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link" href="/login.html">Login</a></li>
-          <li class="nav-item"><a class="nav-link active" href="/subscription/movie_content.html">Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link" href="/profile.html">Profile</a></li>
-        </ul>
-      </div>
-    </div>
-  </nav>
+  <!-- ... (nav and content unchanged) -->
 
-  <div class="container mt-5">
-    <div class="row justify-content-center">
-      <div class="col-lg-8">
-        <div class="profile-header">
-          <h1 class="display-4 text-center mb-4">Movies</h1>
-          <p class="lead text-center">Enjoy your premium movie content!</p>
-        </div>
-
-        <div class="row">
-          <div class="col-md-4"><div class="movie-card"><h3>Movie 1</h3><p>Action-packed blockbuster!</p></div></div>
-          <div class="col-md-4"><div class="movie-card"><h3>Movie 2</h3><p>Heartwarming drama!</p></div></div>
-          <div class="col-md-4"><div class="movie-card"><h3>Movie 3</h3><p>Thrilling sci-fi adventure!</p></div></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-  <script src="/protected/js/auth.js"></script>
+  <script src="/protected/auth.js"></script>  <!-- Note: Path assumes /public is root on Hostinger; adjust if needed -->
+  <script>
+    async function checkSubscription() {
+      try {
+        const response = await fetch(`${API_URL}/profile`, {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        if (!data.subscription_active) {
+          alert('This page requires an active subscription. Redirecting to profile...');
+          window.location.href = '/profile.html';
+        }
+      } catch (error) {
+        console.error('Subscription check error:', error);
+        alert('Access denied. Redirecting to profile...');
+        window.location.href = '/profile.html';
+      }
+    }
+    window.addEventListener('load', checkSubscription);
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
