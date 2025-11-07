@@ -1,177 +1,107 @@
-<!-- public/profile.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Movies App - Profile</title>
+  <title>Movies App – Profile</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body {
-      background: linear-gradient(135deg, #1a3c34, #4b0082, #000000);
-      color: white;
-      padding-top: 80px;
-    }
-    .profile-header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border-radius: 20px;
-      padding: 40px;
-      margin-bottom: 30px;
-    }
-    .status-badge {
-      display: inline-block;
-      padding: 0.5rem 1.5rem;
-      border-radius: 20px;
-      font-size: 1.1rem;
-      font-weight: bold;
-    }
-    .green { background-color: #28a745; color: white; }
-    .red { background-color: #dc3545; color: white; }
+    body{background:linear-gradient(135deg,#1a3c34,#4b0082,#000);color:#fff;padding-top:80px}
+    .card{background:linear-gradient(135deg,#667eea,#764ba2);border-radius:20px;padding:40px}
+    .status-badge{display:inline-block;padding:.5rem 1.5rem;border-radius:20px;font-weight:bold}
+    .green{background:#28a745;color:#fff}.red{background:#dc3545;color:#fff}
   </style>
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-    <div class="container">
-      <a class="navbar-brand fw-bold" href="/index.html">🎬 Movies App</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="/index.html">🏠 Home</a></li>
-          <li class="nav-item"><a class="nav-link" href="/signup.html">📝 Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link" href="/login.html">🔐 Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="/subscription/movie_content.html">🌟 Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link active" href="/profile.html">👤 Profile</a></li>
-        </ul>
-      </div>
-    </div>
-  </nav>
 
-  <div class="container mt-5">
-    <div class="row justify-content-center">
-      <div class="col-lg-6">
-        <div class="profile-header text-center">
-          <h1 class="display-4 mb-4">👤 User Profile</h1>
-          <p><strong>Username:</strong> <span id="username">Loading...</span></p>
-          <p><strong>Email:</strong> <span id="email">Loading...</span></p>
-          <p><strong>Subscription:</strong> <span id="subscriptionStatus" class="status-badge red">Inactive</span></p>
-          <div class="mt-4">
-            <button id="subscribeWeeklyBtn" class="btn btn-primary me-2">Subscribe Weekly (7 Days)</button>
-            <button id="subscribeMonthlyBtn" class="btn btn-primary me-2">Subscribe Monthly (30 Days)</button>
-            <button id="cancelSubscriptionBtn" class="btn btn-danger">Cancel Subscription</button>
-          </div>
-          <div class="mt-4">
-            <button id="logoutBtn" class="btn btn-warning">Logout</button>
-          </div>
-        </div>
-      </div>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+  <div class="container">
+    <a class="navbar-brand fw-bold" href="/streampaltest/public/index.html">Movies App</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item"><a class="nav-link" href="/streampaltest/public/index.html">Home</a></li>
+        <li class="nav-item"><a class="nav-link" href="/streampaltest/public/signup.html">Sign Up</a></li>
+        <li class="nav-item"><a class="nav-link" href="/streampaltest/public/login.html">Login</a></li>
+        <li class="nav-item"><a class="nav-link" href="/streampaltest/public/subscription/movie_content.html">Movie Content</a></li>
+        <li class="nav-item"><a class="nav-link active" href="/streampaltest/public/profile.html">Profile</a></li>
+      </ul>
     </div>
   </div>
+</nav>
 
-  <script src="/protected/js/auth.js"></script>
-  <script>
-    async function loadProfile() {
-      try {
-        const response = await fetch(`${API_URL}/profile`, {
-          credentials: 'include'
-        });
-        console.log('Profile response:', response.status);
-        const data = await response.json();
-        console.log('Profile data:', data);
-        if (data.error) {
-          console.error('Profile error:', data.error);
-          window.location.href = '/login.html';
-          return;
-        }
+<div class="container mt-5">
+  <div class="card mx-auto text-center" style="max-width:500px" id="profileCard">
+    <div class="spinner-border text-light" role="status"><span class="visually-hidden">Loading…</span></div>
+  </div>
+</div>
 
-        document.getElementById('username').textContent = data.username;
-        document.getElementById('email').textContent = data.email;
-        const statusSpan = document.getElementById('subscriptionStatus');
-        statusSpan.textContent = data.subscription_active ? 'Active' : 'Inactive';
-        statusSpan.classList.toggle('green', data.subscription_active);
-        statusSpan.classList.toggle('red', !data.subscription_active);
-
-        document.getElementById('subscribeWeeklyBtn').disabled = data.subscription_active;
-        document.getElementById('subscribeMonthlyBtn').disabled = data.subscription_active;
-        document.getElementById('cancelSubscriptionBtn').disabled = !data.subscription_active;
-      } catch (error) {
-        console.error('Load profile error:', error.message);
-        window.location.href = '/login.html';
-      }
-    }
-
-    async function subscribe(type) {
-      try {
-        const response = await fetch(`${API_URL}/create-checkout-session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type }),
-          credentials: 'include'
-        });
-        const data = await response.json();
-        console.log('Checkout response:', data);
-        if (data.url) {
-          window.location.href = data.url;
-        } else {
-          alert('Failed to start subscription: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        console.error('Subscription error:', error.message);
-        alert('Failed to start subscription');
-      }
-    }
-
-    async function deleteSubscription() {
-      if (!confirm('Are you sure you want to delete your subscription?')) {
+<script src="protected/js/auth.js"></script>
+<script>
+  async function loadProfile() {
+    const card = document.getElementById('profileCard');
+    try {
+      const r = await loggedFetch(`${API_URL}/profile`);
+      if (r.status === 401) {                     // NOT LOGGED IN
+        card.innerHTML = `
+          <h1 class="display-4 mb-4">Not Logged In</h1>
+          <p class="lead">Please log in to view your profile.</p>
+          <div class="mt-4">
+            <a href="/streampaltest/public/login.html" class="btn btn-primary btn-lg">Log In</a>
+            <a href="/streampaltest/public/signup.html" class="btn btn-outline-light btn-lg ms-2">Sign Up</a>
+          </div>`;
         return;
       }
-      try {
-        const response = await fetch(`${API_URL}/delete-subscription`, {
-          method: 'POST',
-          credentials: 'include'
-        });
-        const data = await response.json();
-        console.log('Cancel subscription response:', data);
-        if (data.success) {
-          alert('Subscription cancelled successfully');
-          loadProfile();
-        } else {
-          alert('Failed to cancel subscription: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        console.error('Cancel subscription error:', error.message);
-        alert('Failed to cancel subscription');
-      }
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      const d = await r.json();
+
+      card.innerHTML = `
+        <h1 class="display-4 mb-4">User Profile</h1>
+        <p><strong>Username:</strong> <span id="username">${d.username}</span></p>
+        <p><strong>Email:</strong> <span id="email">${d.email}</span></p>
+        <p><strong>Subscription:</strong>
+          <span class="status-badge ${d.subscription_active?'green':'red'}">
+            ${d.subscription_active?'Active':'Inactive'}
+          </span>
+        </p>
+        <div class="mt-4">
+          <button id="subWeekly" class="btn btn-primary me-2" ${d.subscription_active?'disabled':''}>Subscribe Weekly (7 Days)</button>
+          <button id="subMonthly" class="btn btn-primary me-2" ${d.subscription_active?'disabled':''}>Subscribe Monthly (30 Days)</button>
+          <button id="cancelSub" class="btn btn-danger" ${!d.subscription_active?'disabled':''}>Cancel Subscription</button>
+        </div>
+        <div class="mt-4"><button id="logoutBtn" class="btn btn-warning">Logout</button></div>`;
+      
+      document.getElementById('subWeekly')?.addEventListener('click',()=>subscribe('WEEKLY'));
+      document.getElementById('subMonthly')?.addEventListener('click',()=>subscribe('MONTHLY'));
+      document.getElementById('cancelSub')?.addEventListener('click',deleteSubscription);
+      document.getElementById('logoutBtn')?.addEventListener('click',logout);
+    } catch (e) {
+      card.innerHTML = `<h1 class="display-4 mb-4">Error</h1><p class="lead">${e.message}</p>
+        <button class="btn btn-primary" onclick="loadProfile()">Retry</button>`;
     }
+  }
 
-    async function logout() {
-      try {
-        const response = await fetch(`${API_URL}/logout`, {
-          method: 'POST',
-          credentials: 'include'
-        });
-        const data = await response.json();
-        console.log('Logout response:', data);
-        if (data.success) {
-          window.location.href = '/login.html';
-        } else {
-          alert('Failed to logout: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        console.error('Logout error:', error.message);
-        alert('Failed to logout');
-      }
-    }
+  async function subscribe(type){
+    try{const r=await loggedFetch(`${API_URL}/create-checkout-session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type})});
+      const d=await r.json();if(d.url)location.href=d.url;else alert('Failed');}
+    catch(e){alert('Subscription error');}
+  }
+  async function deleteSubscription(){
+    if(!confirm('Cancel?'))return;
+    try{const r=await loggedFetch(`${API_URL}/delete-subscription`,{method:'POST'});
+      const d=await r.json();if(d.success){alert('Cancelled');loadProfile();}
+      else alert('Cancel failed');}
+    catch(e){alert('Cancel error');}
+  }
+  async function logout(){
+    try{const r=await loggedFetch(`${API_URL}/logout`,{method:'POST'});
+      const d=await r.json();if(d.success)location.href='/streampaltest/public/login.html';
+      else alert('Logout failed');}
+    catch(e){alert('Logout error');}
+  }
 
-    document.getElementById('subscribeWeeklyBtn').addEventListener('click', () => subscribe('WEEKLY'));
-    document.getElementById('subscribeMonthlyBtn').addEventListener('click', () => subscribe('MONTHLY'));
-    document.getElementById('cancelSubscriptionBtn').addEventListener('click', deleteSubscription);
-    document.getElementById('logoutBtn').addEventListener('click', logout);
-
-    window.addEventListener('load', loadProfile);
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  window.addEventListener('load',loadProfile);
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
