@@ -1,239 +1,234 @@
-// server.js
+// server.js – CommonJS (works on Node 22+)
+require('dotenv').config();                     // <-- load .env first
 const express = require('express');
+const session = require('express-session');
+const MySQLStore = require('express-mysql-session')(session);
 const mysql = require('mysql2/promise');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const bodyParser = require('body-parser');
-const path = require('path');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-require('dotenv').config();
-
+const bcrypt = require('bcryptjs');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const SECRET_KEY = process.env.JWT_SECRET || 'supersecret123!@#';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_i93P8B7vfplPpweehki6wKdWozoJGhmZ';
 
-// Stripe price IDs
-const PRICE_WEEKLY = 'price_1SIBPkFF2HALdyFkogiGJG5w'; // 7 days for $2.95
-const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq'; // 30 days for $7.75
-
-const isProduction = process.env.NODE_ENV === 'production';
-const SERVER_DOMAIN = isProduction ? 'https://authappmain.onrender.com' : 'http://localhost:3000';
-const FRONTEND_DOMAIN = process.env.FRONTEND_DOMAIN || (isProduction ? 'https://techsport.app/streampaltest/public' : 'http://localhost:3000');
-
-// Middleware setup
-app.use(cookieParser());
-app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app', 'https://spauth.techsport.app'],
-  credentials: true
-}));
-
-// Webhook route with raw body parser (must be first)
-app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
-  console.log('📥 Webhook request received');
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-    console.log('✅ Webhook verified:', { type: event.type, id: event.id });
-  } catch (err) {
-    console.error('💥 Webhook verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    console.log('🛒 Checkout session completed:', { sessionId: session.id, mode: session.mode });
-    if (session.mode === 'subscription' && session.subscription && session.metadata.userId) {
-      const subscriptionId = session.subscription;
-      const userId = session.metadata.userId;
-      const customerId = session.customer;
-      console.log('🔍 Checking user existence for ID:', userId);
-      const [rows] = await pool.execute('SELECT id FROM users WHERE id = ?', [userId]);
-      if (rows.length === 0) {
-        console.error('💥 User not found:', userId);
-        return res.status(400).json({ error: 'User not found' });
-      }
-      console.log('📤 Updating user subscription:', { userId, subscriptionId, customerId });
-      await pool.execute(
-        'UPDATE users SET customer_id = ?, subscription_id = ?, subscription_active = TRUE WHERE id = ?',
-        [customerId, subscriptionId, userId]
-      );
-      console.log('✅ Subscription activated:', { userId, subscriptionId, customerId });
-    }
-  } else if (event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.canceled') {
-    const subscription = event.data.object;
-    console.log('📤 Deactivating subscription:', subscription.id);
-    await pool.execute(
-      'UPDATE users SET subscription_id = NULL, subscription_active = FALSE WHERE subscription_id = ?',
-      [subscription.id]
-    );
-    console.log('✅ Subscription deactivated:', subscription.id);
-  }
-
-  res.json({ received: true });
-});
-
-// Subscription folder middleware (only for local/development)
-async function checkSubscription(req, res, next) {
-  console.log('🔒 Checking subscription access');
-  const token = req.cookies?.authToken;
-  if (!token) {
-    console.error('❌ No token for subscription content');
-    return res.status(403).send(`
-      <script>
-        alert('This page is for subscriptions. Please subscribe to access premium content.');
-        window.location.href = '/profile.html';
-      </script>
-    `);
-  }
-  try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    console.log('🔍 Fetching subscription status for user ID:', decoded.id);
-    const [rows] = await pool.execute('SELECT subscription_active FROM users WHERE id = ?', [decoded.id]);
-    if (rows.length === 0 || !rows[0].subscription_active) {
-      console.log('❌ Subscription check failed for user ID:', decoded.id);
-      return res.status(403).send(`
-        <script>
-          alert('This page is for subscriptions. Please subscribe to access premium content.');
-          window.location.href = '/profile.html';
-        </script>
-      `);
-    }
-    console.log('✅ Subscription check passed for user ID:', decoded.id);
-    next();
-  } catch (error) {
-    console.error('💥 Subscription check error:', error.message);
-    return res.status(403).send(`
-      <script>
-        alert('This page is for subscriptions. Please subscribe to access premium content.');
-        window.location.href = '/profile.html';
-      </script>
-    `);
-  }
-}
-
-if (!isProduction) {
-  // Only serve protected static in local mode
-  app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
-}
-
-// Other middleware
-app.use(bodyParser.json({ limit: '100mb' }));
-app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
-
-if (!isProduction) {
-  // Only serve general static in local mode
-  app.use(express.static(path.join(__dirname, 'public')));
-  app.get('/', (req, res) => {
-    console.log('🏠 Serving root index.html locally');
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  });
-}
-
-// MySQL setup (add more logs)
-const dbConfig = {
-  host: process.env.MYSQL_HOST,
-  user: process.env.MYSQL_USER,
-  password: process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQL_DATABASE,
-  port: process.env.MYSQL_PORT || 3306,
+// ---------------------------------------------------------------------
+// 1. MySQL connection pool
+// ---------------------------------------------------------------------
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASS || '',
+  database: process.env.DB_NAME || 'authapp',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
-};
-const pool = mysql.createPool(dbConfig);
+});
 
-async function connectDB() {
-  try {
-    console.log('🔌 Attempting MySQL connection');
-    await pool.getConnection();
-    console.log('✅ MySQL Connected');
-    console.log('📤 Applying database schema updates');
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(255)`);
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR(255)`);
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT FALSE`);
-    console.log('✅ Schema updates applied');
-  } catch (err) {
-    console.error('❌ MySQL Connection Error:', err.message);
-  }
-}
-connectDB();
+// ---------------------------------------------------------------------
+// 2. Session store
+// ---------------------------------------------------------------------
+const sessionStore = new MySQLStore({}, pool);
 
-const wordList = ['apple', 'banana', 'cat', 'dog', 'elephant', 'fox', 'grape', 'horse', 'ice', 'jungle', 'kiwi', 'lemon', 'monkey', 'nut', 'orange', 'pear', 'queen', 'rabbit', 'snake', 'tiger', 'umbrella', 'violet', 'whale', 'xray', 'yellow', 'zebra'];
-
-function generateMnemonic() {
-  let mnemonic = [];
-  for (let i = 0; i < 12; i++) {
-    mnemonic.push(wordList[Math.floor(Math.random() * wordList.length)]);
-  }
-  return mnemonic.join(' ');
-}
-
-async function verifyToken(req, res, next) {
-  console.log('🔑 Verifying token');
-  const token = req.cookies?.authToken;
-  if (!token) {
-    console.error('❌ No token in request');
-    return res.status(403).json({ error: 'No token provided' });
-  }
-  try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.userId = decoded.id;
-    console.log('✅ Token verified for user ID:', req.userId);
-    next();
-  } catch (error) {
-    console.error('❌ Invalid token:', error.message);
-    res.status(401).json({ error: 'Invalid token' });
-  }
-}
-
-app.post('/signup', async (req, res) => {
-  console.log('🔥 SIGNUP request:', req.body);
-  try {
-    const { username, email, password } = req.body;
-    if (!username || !email || !password) {
-      console.error('❌ Missing fields in signup');
-      return res.status(400).json({ error: 'Missing fields' });
+app.use(
+  session({
+    key: 'session_cookie',
+    secret: process.env.SESSION_SECRET || 'fallback-secret',
+    store: sessionStore,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 1000 * 60 * 60 * 24 * 7   // 7 days
     }
-    const password_hash = await bcrypt.hash(password, 10);
-    console.log('🔍 Checking for existing user:', { username, email });
-    // ... (rest of your signup code, add logs similarly to try/catch blocks)
-    // Truncated for brevity, but add console.log before/after DB inserts and errors
-  } catch (error) {
-    console.error('💥 Signup error:', error.message);
-    res.status(500).json({ error: 'Signup failed' });
-  }
+  })
+);
+
+// ---------------------------------------------------------------------
+// 3. Middleware
+// ---------------------------------------------------------------------
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/streampaltest/public', express.static(path.join(__dirname, 'public')));
+
+// ---------------------------------------------------------------------
+// 4. Helper: ensure logged-in user
+// ---------------------------------------------------------------------
+function requireAuth(req, res, next) {
+  if (req.session && req.session.userId) return next();
+  res.status(401).json({ error: 'Unauthorized' });
+}
+
+// ---------------------------------------------------------------------
+// 5. ROUTES
+// ---------------------------------------------------------------------
+
+// ---- Home (static) ---------------------------------------------------
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Add similar console logs to /login, /profile, /create-checkout-session, /verify-session, /delete-subscription, /check-subscription, /logout
-// For example, in /login:
-app.post('/login', async (req, res) => {
-  console.log('🔐 LOGIN request:', req.body);
+// ---- Signup ---------------------------------------------------------
+app.post('/signup', async (req, res) => {
+  const { username, email, password } = req.body;
   try {
-    // ... your code ...
-    console.log('🔍 Querying user:', { login });
-    // After query
-    console.log('✅ User found, checking password');
-    // etc.
-  } catch (error) {
-    console.error('💥 Login error:', error.message);
+    const hash = await bcrypt.hash(password, 10);
+    const [result] = await pool.execute(
+      'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+      [username, email, hash]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Signup error:', e);
+    res.status(400).json({ error: e.sqlMessage || 'Signup failed' });
   }
 });
 
-// Update success_url in /create-checkout-session to use FRONTEND_DOMAIN
-// In the session creation:
-const session = await stripe.checkout.sessions.create({
-  // ... your code ...
-  success_url: `${FRONTEND_DOMAIN}/success.html?session_id={CHECKOUT_SESSION_ID}`,
-  cancel_url: `${FRONTEND_DOMAIN}/cancel.html`,
-  // ...
+// ---- Login -----------------------------------------------------------
+app.post('/login', async (req, res) => {
+  const { login, password, mnemonic } = req.body;   // login = username or email
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id, username, password_hash FROM users WHERE username = ? OR email = ?',
+      [login, login]
+    );
+    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const user = rows[0];
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // optional mnemonic check can go here
+
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Login error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
+// ---- Logout ---------------------------------------------------------
+app.post('/logout', (req, res) => {
+  req.session.destroy(() => res.json({ success: true }));
+});
+
+// ---- Profile --------------------------------------------------------
+app.get('/profile', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT u.username, u.email,
+              s.active AS subscription_active
+         FROM users u
+         LEFT JOIN subscriptions s ON u.id = s.user_id AND s.active = 1
+        WHERE u.id = ?`,
+      [req.session.userId]
+    );
+    const user = rows[0];
+    res.json({
+      username: user.username,
+      email: user.email,
+      subscription_active: !!user.subscription_active
+    });
+  } catch (e) {
+    console.error('Profile error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ---- Create Stripe checkout session ---------------------------------
+app.post('/create-checkout-session', requireAuth, async (req, res) => {
+  const { type } = req.body;               // WEEKLY or MONTHLY
+  const priceId =
+    type === 'WEEKLY'
+      ? process.env.STRIPE_PRICE_WEEKLY
+      : process.env.STRIPE_PRICE_MONTHLY;
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${process.env.BASE_URL}/streampaltest/public/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.BASE_URL}/streampaltest/public/cancel.html`,
+      client_reference_id: req.session.userId.toString()
+    });
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error('Stripe error:', e);
+    res.status(500).json({ error: 'Failed to create session' });
+  }
+});
+
+// ---- Verify Stripe webhook (success) --------------------------------
+app.post(
+  '/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error('Webhook sig error:', err);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const userId = session.client_reference_id;
+      const subId = session.subscription;
+
+      // simple activation – you can expand with invoice.paid etc.
+      await pool.execute(
+        `INSERT INTO subscriptions (user_id, stripe_sub_id, active)
+         VALUES (?, ?, 1)
+         ON DUPLICATE KEY UPDATE active = 1`,
+        [userId, subId]
+      );
+    }
+    res.json({ received: true });
+  }
+);
+
+// ---- Delete / cancel subscription ------------------------------------
+app.post('/delete-subscription', requireAuth, async (req, res) => {
+  try {
+    await pool.execute(
+      'UPDATE subscriptions SET active = 0 WHERE user_id = ? AND active = 1',
+      [req.session.userId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Cancel error:', e);
+    res.status(500).json({ error: 'Cancel failed' });
+  }
+});
+
+// ---- Check subscription (for movie_content.html) --------------------
+app.get('/check-subscription', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT active FROM subscriptions WHERE user_id = ? AND active = 1',
+      [req.session.userId]
+    );
+    res.json({ active: rows.length > 0 });
+  } catch (e) {
+    console.error('Check-sub error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ---------------------------------------------------------------------
+// 6. Start server
+// ---------------------------------------------------------------------
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT} (Production: ${isProduction})`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`   Public folder → http://localhost:${PORT}/streampaltest/public`);
 });
