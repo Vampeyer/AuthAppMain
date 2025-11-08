@@ -27,7 +27,7 @@ const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onre
 // Middleware setup
 app.use(cookieParser());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app', 'https://spauth.techsport.app'],
+  origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app', 'https://authappmain.onrender.com/'],
   credentials: true
 }));
 
