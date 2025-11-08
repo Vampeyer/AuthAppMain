@@ -3,21 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Movies App – Profile</title>
+  <title>Movies App - Profile</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body{background:linear-gradient(135deg,#1a3c34,#4b0082,#000);color:#fff;padding-top:80px}
-    .card{background:linear-gradient(135deg,#667eea,#764ba2);border-radius:20px;padding:40px}
-    .status-badge{display:inline-block;padding:.5rem 1.5rem;border-radius:20px;font-weight:bold}
-    .green{background:#28a745;color:#fff}.red{background:#dc3545;color:#fff}
+    body {
+      background: linear-gradient(135deg, #1a3c34, #4b0082, #000000);
+      color: white;
+      padding-top: 80px;
+    }
+    .profile-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 20px;
+      padding: 40px;
+      margin-bottom: 30px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: .5rem 1.5rem;
+      border-radius: 20px;
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+    .green { background:#28a745; color:#fff; }
+    .red   { background:#dc3545; color:#fff; }
   </style>
 </head>
 <body>
 
+<!-- Navbar -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
   <div class="container">
     <a class="navbar-brand fw-bold" href="/streampaltest/public/index.html">Movies App</a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
     <div class="collapse navbar-collapse" id="navbarNav">
       <ul class="navbar-nav">
         <li class="nav-item"><a class="nav-link" href="/streampaltest/public/index.html">Home</a></li>
@@ -30,30 +50,42 @@
   </div>
 </nav>
 
+<!-- Profile Card -->
 <div class="container mt-5">
-  <div class="card mx-auto text-center" style="max-width:500px" id="profileCard">
-    <div class="spinner-border text-light" role="status"><span class="visually-hidden">Loading…</span></div>
+  <div class="row justify-content-center">
+    <div class="col-lg-6">
+      <div class="profile-header text-center" id="profileCard">
+        <div class="spinner-border text-light" role="status"><span class="visually-hidden">Loading…</span></div>
+      </div>
+    </div>
   </div>
 </div>
 
+<!-- Scripts -->
 <script src="protected/js/auth.js"></script>
 <script>
   async function loadProfile() {
     const card = document.getElementById('profileCard');
     try {
       const r = await loggedFetch(`${API_URL}/profile`);
-      if (r.status === 401) {                     // NOT LOGGED IN
+      console.log('Profile status:', r.status);
+
+      // 401 = Not logged in → show message, NO REDIRECT
+      if (r.status === 401) {
         card.innerHTML = `
           <h1 class="display-4 mb-4">Not Logged In</h1>
-          <p class="lead">Please log in to view your profile.</p>
+          <p class="lead">You need to be logged in to view your profile.</p>
           <div class="mt-4">
             <a href="/streampaltest/public/login.html" class="btn btn-primary btn-lg">Log In</a>
             <a href="/streampaltest/public/signup.html" class="btn btn-outline-light btn-lg ms-2">Sign Up</a>
           </div>`;
         return;
       }
-      if (!r.ok) throw new Error('HTTP '+r.status);
+
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
       const d = await r.json();
+      console.log('Profile data:', d);
 
       card.innerHTML = `
         <h1 class="display-4 mb-4">User Profile</h1>
@@ -69,39 +101,69 @@
           <button id="subMonthly" class="btn btn-primary me-2" ${d.subscription_active?'disabled':''}>Subscribe Monthly (30 Days)</button>
           <button id="cancelSub" class="btn btn-danger" ${!d.subscription_active?'disabled':''}>Cancel Subscription</button>
         </div>
-        <div class="mt-4"><button id="logoutBtn" class="btn btn-warning">Logout</button></div>`;
-      
-      document.getElementById('subWeekly')?.addEventListener('click',()=>subscribe('WEEKLY'));
-      document.getElementById('subMonthly')?.addEventListener('click',()=>subscribe('MONTHLY'));
-      document.getElementById('cancelSub')?.addEventListener('click',deleteSubscription);
-      document.getElementById('logoutBtn')?.addEventListener('click',logout);
+        <div class="mt-4">
+          <button id="logoutBtn" class="btn btn-warning">Logout</button>
+        </div>`;
+
+      // Re-attach listeners
+      document.getElementById('subWeekly')?.addEventListener('click', () => subscribe('WEEKLY'));
+      document.getElementById('subMonthly')?.addEventListener('click', () => subscribe('MONTHLY'));
+      document.getElementById('cancelSub')?.addEventListener('click', deleteSubscription);
+      document.getElementById('logoutBtn')?.addEventListener('click', logout);
+
     } catch (e) {
-      card.innerHTML = `<h1 class="display-4 mb-4">Error</h1><p class="lead">${e.message}</p>
+      console.error('loadProfile error:', e);
+      card.innerHTML = `
+        <h1 class="display-4 mb-4">Connection Error</h1>
+        <p class="lead">${e.message}</p>
         <button class="btn btn-primary" onclick="loadProfile()">Retry</button>`;
     }
   }
 
-  async function subscribe(type){
-    try{const r=await loggedFetch(`${API_URL}/create-checkout-session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type})});
-      const d=await r.json();if(d.url)location.href=d.url;else alert('Failed');}
-    catch(e){alert('Subscription error');}
-  }
-  async function deleteSubscription(){
-    if(!confirm('Cancel?'))return;
-    try{const r=await loggedFetch(`${API_URL}/delete-subscription`,{method:'POST'});
-      const d=await r.json();if(d.success){alert('Cancelled');loadProfile();}
-      else alert('Cancel failed');}
-    catch(e){alert('Cancel error');}
-  }
-  async function logout(){
-    try{const r=await loggedFetch(`${API_URL}/logout`,{method:'POST'});
-      const d=await r.json();if(d.success)location.href='/streampaltest/public/login.html';
-      else alert('Logout failed');}
-    catch(e){alert('Logout error');}
+  async function subscribe(type) {
+    try {
+      const r = await loggedFetch(`${API_URL}/create-checkout-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type })
+      });
+      const d = await r.json();
+      if (d.url) location.href = d.url;
+      else alert('Failed: ' + (d.error || ''));
+    } catch (e) {
+      console.error('Subscribe error:', e);
+      alert('Subscription failed');
+    }
   }
 
-  window.addEventListener('load',loadProfile);
+  async function deleteSubscription() {
+    if (!confirm('Cancel subscription?')) return;
+    try {
+      const r = await loggedFetch(`${API_URL}/delete-subscription`, { method: 'POST' });
+      const d = await r.json();
+      if (d.success) { alert('Cancelled'); loadProfile(); }
+      else alert('Cancel failed');
+    } catch (e) {
+      console.error('Cancel error:', e);
+      alert('Failed');
+    }
+  }
+
+  async function logout() {
+    try {
+      const r = await loggedFetch(`${API_URL}/logout`, { method: 'POST' });
+      const d = await r.json();
+      if (d.success) location.href = '/streampaltest/public/login.html';
+      else alert('Logout failed');
+    } catch (e) {
+      console.error('Logout error:', e);
+      alert('Failed');
+    }
+  }
+
+  window.addEventListener('load', loadProfile);
 </script>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
