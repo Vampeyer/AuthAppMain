@@ -44,7 +44,7 @@ const allowedOrigins = [
   'https://www.techsport.app',
   'https://spauth.techsport.app',
   'https://authappmain.onrender.com',
-  'https://www.techsport.app/streampaltest'
+  'https://movies-auth-app.onrender.com'
 ];
 
 app.use(cors({
