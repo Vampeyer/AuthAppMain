@@ -20,15 +20,48 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_i93P8B
 const PRICE_WEEKLY = 'price_1SIBPkFF2HALdyFkogiGJG5w'; // 7 days for $2.95
 const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq'; // 30 days for $7.75
 
-const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onrender.com' : 'http://localhost:3000';
+// Dynamic DOMAIN based on environment
+let DOMAIN;
+if (process.env.NODE_ENV === 'production') {
+  DOMAIN = 'https://movies-auth-app.onrender.com';
+} else {
+  DOMAIN = 'http://localhost:3000';
+}
 
-//const DOMAIN = process.env.NODE_ENV === 'production' ? 'https://authappmain.onrender.com' : 'http://localhost:3000';
+console.log('🌍 Server DOMAIN set to:', DOMAIN);
+console.log('🔧 Environment:', process.env.NODE_ENV || 'development');
 
 // Middleware setup
 app.use(cookieParser());
+
+// CORS configuration - allow multiple origins
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://127.0.0.1:3000',
+  'https://techsport.app',
+  'https://www.techsport.app',
+  'https://spauth.techsport.app',
+  'https://movies-auth-app.onrender.com'
+];
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:5500', 'https://techsport.app', 'https://authappmain.onrender.com/'],
-  credentials: true
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ CORS allowed for origin:', origin);
+      callback(null, true);
+    } else {
+      console.warn('⚠️ CORS blocked for origin:', origin);
+      callback(null, true); // Still allow for development - change to false in production if needed
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Webhook route with raw body parser (must be first)
@@ -89,7 +122,7 @@ async function checkSubscription(req, res, next) {
     const decoded = jwt.verify(token, SECRET_KEY);
     const [rows] = await pool.execute('SELECT subscription_active FROM users WHERE id = ?', [decoded.id]);
     if (rows.length === 0 || !rows[0].subscription_active) {
-      console.log('✅ Subscription check failed for user ID:', decoded.id);
+      console.log('❌ Subscription check failed for user ID:', decoded.id);
       return res.status(403).send(`
         <script>
           alert('This page is for subscriptions. Please subscribe to access premium content.');
@@ -115,8 +148,16 @@ app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Root route
 app.get('/', (req, res) => {
+  console.log('📄 Serving index.html');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
 // MySQL setup
@@ -136,9 +177,20 @@ async function connectDB() {
   try {
     await pool.getConnection();
     console.log('✅ MySQL Connected');
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(255)`);
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_id VARCHAR(255)`);
-    await pool.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT FALSE`);
+    
+    // Create table if not exists
+    await pool.execute(`CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(255) UNIQUE,
+      email VARCHAR(255) UNIQUE,
+      password_hash VARCHAR(255),
+      mnemonic TEXT,
+      customer_id VARCHAR(255),
+      subscription_id VARCHAR(255),
+      subscription_active BOOLEAN DEFAULT FALSE
+    )`);
+    
+    console.log('✅ Users table ready');
   } catch (err) {
     console.error('❌ MySQL Error:', err.message);
   }
@@ -181,17 +233,6 @@ app.post('/signup', async (req, res) => {
     }
     const password_hash = await bcrypt.hash(password, 10);
     const mnemonic = generateMnemonic();
-
-    await pool.execute(`CREATE TABLE IF NOT EXISTS users (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      username VARCHAR(255) UNIQUE,
-      email VARCHAR(255) UNIQUE,
-      password_hash VARCHAR(255),
-      mnemonic TEXT,
-      customer_id VARCHAR(255),
-      subscription_id VARCHAR(255),
-      subscription_active BOOLEAN DEFAULT FALSE
-    )`);
 
     await pool.execute(
       'INSERT INTO users (username, email, password_hash, mnemonic) VALUES (?, ?, ?, ?)',
@@ -290,7 +331,6 @@ app.post('/create-checkout-session', verifyToken, async (req, res) => {
       await pool.execute('UPDATE users SET customer_id = ? WHERE id = ?', [customerId, req.userId]);
       console.log('✅ New Stripe customer created:', customerId);
     } else {
-      // Verify customer exists in Stripe
       try {
         await stripe.customers.retrieve(customerId);
       } catch (err) {
@@ -383,6 +423,8 @@ app.post('/logout', (req, res) => {
   res.json({ success: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server: http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 Domain: ${DOMAIN}`);
 });

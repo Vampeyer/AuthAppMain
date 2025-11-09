@@ -28,6 +28,7 @@
     }
     .green { background-color: #28a745; color: white; }
     .red { background-color: #dc3545; color: white; }
+    .orange { background-color: #ff8c00; color: white; }
   </style>
 </head>
 <body>
@@ -54,16 +55,27 @@
       <div class="col-lg-6">
         <div class="profile-header text-center">
           <h1 class="display-4 mb-4">👤 User Profile</h1>
-          <p><strong>Username:</strong> <span id="username">Loading...</span></p>
-          <p><strong>Email:</strong> <span id="email">Loading...</span></p>
-          <p><strong>Subscription:</strong> <span id="subscriptionStatus" class="status-badge red">Inactive</span></p>
-          <div class="mt-4">
-            <button id="subscribeWeeklyBtn" class="btn btn-primary me-2">Subscribe Weekly (7 Days)</button>
-            <button id="subscribeMonthlyBtn" class="btn btn-primary me-2">Subscribe Monthly (30 Days)</button>
-            <button id="cancelSubscriptionBtn" class="btn btn-danger">Cancel Subscription</button>
+          <p><strong>Username:</strong> <span id="username">Not Logged In</span></p>
+          <p><strong>Email:</strong> <span id="email">Not Logged In</span></p>
+          <p><strong>Subscription:</strong> <span id="subscriptionStatus" class="status-badge orange">Not Logged In</span></p>
+          
+          <!-- Logged in section - hidden by default -->
+          <div id="loggedInSection" style="display: none;">
+            <div class="mt-4">
+              <button id="subscribeWeeklyBtn" class="btn btn-primary me-2">Subscribe Weekly (7 Days - $2.95)</button>
+              <button id="subscribeMonthlyBtn" class="btn btn-primary me-2">Subscribe Monthly (30 Days - $7.75)</button>
+              <button id="cancelSubscriptionBtn" class="btn btn-danger">Cancel Subscription</button>
+            </div>
+            <div class="mt-4">
+              <button id="logoutBtn" class="btn btn-warning">Logout</button>
+            </div>
           </div>
-          <div class="mt-4">
-            <button id="logoutBtn" class="btn btn-warning">Logout</button>
+          
+          <!-- Not logged in section - shown by default -->
+          <div id="notLoggedInSection" class="mt-4">
+            <p class="lead">Please log in to manage your subscription</p>
+            <a href="/login.html" class="btn btn-success btn-lg">🔐 Login</a>
+            <a href="/signup.html" class="btn btn-info btn-lg ms-2">📝 Sign Up</a>
           </div>
         </div>
       </div>
@@ -74,36 +86,63 @@
   <script>
     async function loadProfile() {
       try {
+        console.log('Attempting to load profile...');
         const response = await fetch(`${API_URL}/profile`, {
           credentials: 'include'
         });
-        console.log('Profile response:', response.status);
+        console.log('Profile response status:', response.status);
+        
+        if (response.status === 403 || response.status === 401) {
+          // User not logged in
+          console.log('User not logged in');
+          showNotLoggedIn();
+          return;
+        }
+        
         const data = await response.json();
         console.log('Profile data:', data);
+        
         if (data.error) {
           console.error('Profile error:', data.error);
-          window.location.href = '/login.html';
+          showNotLoggedIn();
           return;
         }
 
+        // User is logged in - show profile
         document.getElementById('username').textContent = data.username;
         document.getElementById('email').textContent = data.email;
         const statusSpan = document.getElementById('subscriptionStatus');
         statusSpan.textContent = data.subscription_active ? 'Active' : 'Inactive';
+        statusSpan.classList.remove('orange');
         statusSpan.classList.toggle('green', data.subscription_active);
         statusSpan.classList.toggle('red', !data.subscription_active);
 
+        // Show logged in section
+        document.getElementById('loggedInSection').style.display = 'block';
+        document.getElementById('notLoggedInSection').style.display = 'none';
+
+        // Enable/disable buttons based on subscription status
         document.getElementById('subscribeWeeklyBtn').disabled = data.subscription_active;
         document.getElementById('subscribeMonthlyBtn').disabled = data.subscription_active;
         document.getElementById('cancelSubscriptionBtn').disabled = !data.subscription_active;
       } catch (error) {
         console.error('Load profile error:', error.message);
-        window.location.href = '/login.html';
+        showNotLoggedIn();
       }
+    }
+
+    function showNotLoggedIn() {
+      document.getElementById('username').textContent = 'Not Logged In';
+      document.getElementById('email').textContent = 'Not Logged In';
+      document.getElementById('subscriptionStatus').textContent = 'Not Logged In';
+      document.getElementById('subscriptionStatus').className = 'status-badge orange';
+      document.getElementById('loggedInSection').style.display = 'none';
+      document.getElementById('notLoggedInSection').style.display = 'block';
     }
 
     async function subscribe(type) {
       try {
+        console.log('Starting subscription:', type);
         const response = await fetch(`${API_URL}/create-checkout-session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -113,6 +152,7 @@
         const data = await response.json();
         console.log('Checkout response:', data);
         if (data.url) {
+          console.log('Redirecting to Stripe checkout:', data.url);
           window.location.href = data.url;
         } else {
           alert('Failed to start subscription: ' + (data.error || 'Unknown error'));
@@ -124,10 +164,11 @@
     }
 
     async function deleteSubscription() {
-      if (!confirm('Are you sure you want to delete your subscription?')) {
+      if (!confirm('Are you sure you want to cancel your subscription?')) {
         return;
       }
       try {
+        console.log('Cancelling subscription...');
         const response = await fetch(`${API_URL}/delete-subscription`, {
           method: 'POST',
           credentials: 'include'
@@ -148,6 +189,7 @@
 
     async function logout() {
       try {
+        console.log('Logging out...');
         const response = await fetch(`${API_URL}/logout`, {
           method: 'POST',
           credentials: 'include'
@@ -165,10 +207,18 @@
       }
     }
 
-    document.getElementById('subscribeWeeklyBtn').addEventListener('click', () => subscribe('WEEKLY'));
-    document.getElementById('subscribeMonthlyBtn').addEventListener('click', () => subscribe('MONTHLY'));
-    document.getElementById('cancelSubscriptionBtn').addEventListener('click', deleteSubscription);
-    document.getElementById('logoutBtn').addEventListener('click', logout);
+    // Event listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      const weeklyBtn = document.getElementById('subscribeWeeklyBtn');
+      const monthlyBtn = document.getElementById('subscribeMonthlyBtn');
+      const cancelBtn = document.getElementById('cancelSubscriptionBtn');
+      const logoutBtn = document.getElementById('logoutBtn');
+
+      if (weeklyBtn) weeklyBtn.addEventListener('click', () => subscribe('WEEKLY'));
+      if (monthlyBtn) monthlyBtn.addEventListener('click', () => subscribe('MONTHLY'));
+      if (cancelBtn) cancelBtn.addEventListener('click', deleteSubscription);
+      if (logoutBtn) logoutBtn.addEventListener('click', logout);
+    });
 
     window.addEventListener('load', loadProfile);
   </script>
