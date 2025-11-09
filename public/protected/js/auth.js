@@ -8,10 +8,16 @@ function getApiUrl() {
   console.log('Current hostname:', hostname);
   console.log('Current protocol:', protocol);
   
+  // If we're on authappmain.onrender.com, the API is on the same domain
+  if (hostname === 'authappmain.onrender.com') {
+    console.log('Detected authappmain.onrender.com - using same domain API');
+    return 'https://authappmain.onrender.com';
+  }
+  
   // Check if we're on techsport.app domain
   if (hostname.includes('techsport.app')) {
     console.log('Detected techsport.app domain - using Render production server');
-    return 'https://movies-auth-app.onrender.com';
+    return 'https://authappmain.onrender.com';
   }
   
   // Check if we're on localhost or 127.0.0.1
@@ -22,7 +28,7 @@ function getApiUrl() {
   
   // Default to Render production server
   console.log('Using default Render production server');
-  return 'https://movies-auth-app.onrender.com';
+  return 'https://authappmain.onrender.com';
 }
 
 const API_URL = getApiUrl();

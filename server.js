@@ -23,7 +23,7 @@ const PRICE_MONTHLY = 'price_1SIBCzFF2HALdyFk7vOxByGq'; // 30 days for $7.75
 // Dynamic DOMAIN based on environment
 let DOMAIN;
 if (process.env.NODE_ENV === 'production') {
-  DOMAIN = 'https://movies-auth-app.onrender.com';
+  DOMAIN = 'https://authappmain.onrender.com';
 } else {
   DOMAIN = 'http://localhost:3000';
 }
@@ -43,25 +43,29 @@ const allowedOrigins = [
   'https://techsport.app',
   'https://www.techsport.app',
   'https://spauth.techsport.app',
+  'https://authappmain.onrender.com',
   'https://movies-auth-app.onrender.com'
 ];
 
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('✅ CORS allowed for request with no origin');
+      return callback(null, true);
+    }
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       console.log('✅ CORS allowed for origin:', origin);
       callback(null, true);
     } else {
-      console.warn('⚠️ CORS blocked for origin:', origin);
+      console.warn('⚠️ CORS request from unlisted origin:', origin);
       callback(null, true); // Still allow for development - change to false in production if needed
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
 }));
 
 // Webhook route with raw body parser (must be first)
@@ -108,37 +112,86 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
 
 // Subscription folder middleware
 async function checkSubscription(req, res, next) {
+  console.log('🔒 Checking subscription access for:', req.path);
   const token = req.cookies?.authToken;
+  
   if (!token) {
     console.error('❌ No token for subscription content');
     return res.status(403).send(`
-      <script>
-        alert('This page is for subscriptions. Please subscribe to access premium content.');
-        window.location.href = '/profile.html';
-      </script>
-    `);
-  }
-  try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    const [rows] = await pool.execute('SELECT subscription_active FROM users WHERE id = ?', [decoded.id]);
-    if (rows.length === 0 || !rows[0].subscription_active) {
-      console.log('❌ Subscription check failed for user ID:', decoded.id);
-      return res.status(403).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Access Denied</title>
+      </head>
+      <body>
         <script>
-          alert('This page is for subscriptions. Please subscribe to access premium content.');
+          alert('This page requires an active subscription. Please subscribe to access premium content.');
           window.location.href = '/profile.html';
         </script>
+      </body>
+      </html>
+    `);
+  }
+  
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    console.log('✅ Token decoded for user ID:', decoded.id);
+    
+    const [rows] = await pool.execute('SELECT subscription_active FROM users WHERE id = ?', [decoded.id]);
+    
+    if (rows.length === 0) {
+      console.error('❌ User not found for ID:', decoded.id);
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Access Denied</title>
+        </head>
+        <body>
+          <script>
+            alert('User not found. Please log in again.');
+            window.location.href = '/login.html';
+          </script>
+        </body>
+        </html>
       `);
     }
+    
+    if (!rows[0].subscription_active) {
+      console.log('❌ Subscription check failed for user ID:', decoded.id, '- subscription_active:', rows[0].subscription_active);
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Subscription Required</title>
+        </head>
+        <body>
+          <script>
+            alert('This page requires an active subscription. Please subscribe to access premium content.');
+            window.location.href = '/profile.html';
+          </script>
+        </body>
+        </html>
+      `);
+    }
+    
     console.log('✅ Subscription check passed for user ID:', decoded.id);
     next();
   } catch (error) {
     console.error('💥 Subscription check error:', error.message);
     return res.status(403).send(`
-      <script>
-        alert('This page is for subscriptions. Please subscribe to access premium content.');
-        window.location.href = '/profile.html';
-      </script>
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Access Denied</title>
+      </head>
+      <body>
+        <script>
+          alert('Authentication error. Please log in again.');
+          window.location.href = '/login.html';
+        </script>
+      </body>
+      </html>
     `);
   }
 }
