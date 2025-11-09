@@ -44,7 +44,7 @@ const allowedOrigins = [
   'https://www.techsport.app',
   'https://spauth.techsport.app',
   'https://authappmain.onrender.com',
-  'https://movies-auth-app.onrender.com'
+  'https://www.techsport.app/streampaltest'
 ];
 
 app.use(cors({
@@ -332,10 +332,11 @@ app.post('/login', async (req, res) => {
     res.cookie('authToken', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
     console.log('✅ Login success:', user.username);
+    console.log('Cookie set with sameSite:', process.env.NODE_ENV === 'production' ? 'strict' : 'lax');
     res.json({ success: true });
   } catch (error) {
     console.error('💥 Login error:', error.message);
