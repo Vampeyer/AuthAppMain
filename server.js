@@ -407,7 +407,9 @@ app.post('/create-checkout-session', verifyToken, async (req, res) => {
       mode: 'subscription',
       payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${DOMAIN}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+
+      // success_url: `${DOMAIN}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `https://www.techsport.app/streampaltest2/profile?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${DOMAIN}/cancel.html`,
       metadata: { userId: req.userId.toString() }
     });
