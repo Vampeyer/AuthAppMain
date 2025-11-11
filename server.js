@@ -40,6 +40,8 @@ const allowedOrigins = [
   'http://localhost:5500',
   'http://127.0.0.1:5500',
   'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1',
   'https://techsport.app',
   'https://www.techsport.app',
   'https://spauth.techsport.app',
@@ -332,11 +334,10 @@ app.post('/login', async (req, res) => {
     res.cookie('authToken', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
     console.log('✅ Login success:', user.username);
-    console.log('Cookie set with sameSite:', process.env.NODE_ENV === 'production' ? 'strict' : 'lax');
     res.json({ success: true });
   } catch (error) {
     console.error('💥 Login error:', error.message);

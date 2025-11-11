@@ -24,17 +24,17 @@
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
     <div class="container">
-      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
+      <a class="navbar-brand fw-bold" href="/index.html">🎬 Movies App</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="index.html">🏠 Home</a></li>
-          <li class="nav-item"><a class="nav-link" href="signup.html">📝 Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link active" href="login.html">🔐 Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">🌟 Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link" href="profile.html">👤 Profile</a></li>
+          <li class="nav-item"><a class="nav-link" href="/index.html">🏠 Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="/signup.html">📝 Sign Up</a></li>
+          <li class="nav-item"><a class="nav-link active" href="/login.html">🔐 Login</a></li>
+          <li class="nav-item"><a class="nav-link" href="/subscription/movie_content.html">🌟 Movie Content</a></li>
+          <li class="nav-item"><a class="nav-link" href="/profile.html">👤 Profile</a></li>
         </ul>
       </div>
     </div>
@@ -55,20 +55,17 @@
               <input type="password" class="form-control" id="password" required>
             </div>
             <div class="mb-3">
-              <label for="mnemonic" class="form-label">Mnemonic (12-word passphrase)</label>
-              <input type="text" class="form-control" id="mnemonic" required placeholder="word1 word2 word3...">
+              <label for="mnemonic" class="form-label">Mnemonic</label>
+              <input type="text" class="form-control" id="mnemonic" required>
             </div>
             <button type="submit" class="btn btn-primary w-100">Login</button>
           </form>
-          <div class="text-center mt-3">
-            <p>Don't have an account? <a href="signup.html" class="text-warning">Sign Up</a></p>
-          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="protected/js/auth.js"></script>
+  <script src="/protected/js/auth.js"></script>
   <script>
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -76,32 +73,22 @@
       const password = document.getElementById('password').value;
       const mnemonic = document.getElementById('mnemonic').value;
 
-      // Use window.API_URL to ensure it's defined
-      const apiUrl = window.API_URL || 'https://authappmain.onrender.com';
-      console.log('Using API_URL:', apiUrl);
-
       try {
-        console.log('Attempting login for user:', login);
-        const response = await fetch(`${apiUrl}/login`, {
+        const response = await fetch(`${API_URL}/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({ login, password, mnemonic })
         });
-        
-        console.log('Login response status:', response.status);
         const data = await response.json();
         console.log('Login response:', data);
-        
         if (data.success) {
-          console.log('✅ Login successful, redirecting to profile...');
-          window.location.href = 'profile.html';
+          window.location.href = '/profile.html';
         } else {
           alert('Login failed: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
         console.error('Login error:', error.message);
-        alert('Login failed: ' + error.message);
+        alert('Login failed');
       }
     });
   </script>
