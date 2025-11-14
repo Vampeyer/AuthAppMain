@@ -199,8 +199,6 @@ async function checkSubscription(req, res, next) {
 // Other middleware
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
 
 // Root route
 app.get('/', (req, res) => {
@@ -475,6 +473,15 @@ app.post('/logout', (req, res) => {
   console.log('✅ User logged out');
   res.json({ success: true });
 });
+
+
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
+
+
+
+
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
