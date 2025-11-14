@@ -31,7 +31,8 @@ if (process.env.NODE_ENV === 'production') {
 console.log('🌍 Server DOMAIN set to:', DOMAIN);
 console.log('🔧 Environment:', process.env.NODE_ENV || 'development');
 
-
+// Middleware setup
+app.use(cookieParser());
 
 // CORS configuration - allow multiple origins
 const allowedOrigins = [
@@ -45,8 +46,7 @@ const allowedOrigins = [
   'https://authappmain.onrender.com',
   'https://movies-auth-app.onrender.com'
 ];
-// Middleware setup
-app.use(cookieParser());
+
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -195,18 +195,20 @@ async function checkSubscription(req, res, next) {
     `);
   }
 }
+app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
 
 // Other middleware
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
+// REMOVED app.use(express.static(path.join(__dirname, 'public'))); // This line was moved to the end.
 
-// Root route
+// Root route - explicitly defined routes must come before generic static serving.
 app.get('/', (req, res) => {
   console.log('📄 Serving index.html');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Health check endpoint
+// Health check endpoint - explicitly defined routes must come before generic static serving.
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
@@ -474,14 +476,10 @@ app.post('/logout', (req, res) => {
   res.json({ success: true });
 });
 
-
-
+// ----------------------------------------------------------------------
+// 🚨 FIX APPLIED: Moved static file serving to the very end of routing 🚨
+// ----------------------------------------------------------------------
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
-
-
-
-
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
