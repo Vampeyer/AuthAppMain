@@ -31,8 +31,7 @@ if (process.env.NODE_ENV === 'production') {
 console.log('🌍 Server DOMAIN set to:', DOMAIN);
 console.log('🔧 Environment:', process.env.NODE_ENV || 'development');
 
-// Middleware setup
-app.use(cookieParser());
+
 
 // CORS configuration - allow multiple origins
 const allowedOrigins = [
@@ -46,7 +45,8 @@ const allowedOrigins = [
   'https://authappmain.onrender.com',
   'https://movies-auth-app.onrender.com'
 ];
-
+// Middleware setup
+app.use(cookieParser());
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -195,12 +195,12 @@ async function checkSubscription(req, res, next) {
     `);
   }
 }
-app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
 
 // Other middleware
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 'public', 'subscription')));
 
 // Root route
 app.get('/', (req, res) => {

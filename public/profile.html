@@ -82,11 +82,12 @@
     </div>
   </div>
 
-  <script src="/protected/js/auth.js"></script>
+  <script src="./protected/js/auth.js"></script>
   <script>
     async function loadProfile() {
       try {
         console.log('Attempting to load profile...');
+
         const response = await fetch(`${API_URL}/profile`, {
           credentials: 'include'
         });
