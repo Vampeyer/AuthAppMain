@@ -89,6 +89,7 @@
         console.log('Attempting to load profile...');
 
         const response = await fetch(`${API_URL}/profile`, {
+          method: 'GET',
           credentials: 'include'
         });
         console.log('Profile response status:', response.status);

@@ -329,12 +329,22 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '7d' });
-    res.cookie('authToken', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+
+// ----------------------------------------------------
+  // ⚠️ FIX: Change SameSite to None and set Secure to true
+  // ----------------------------------------------------
+  res.cookie('authToken', token, {
+    httpOnly: true,
+    // Must be set to true for SameSite=None
+    secure: true, 
+    // This allows the cookie to be sent from techsport.app to authappmain.onrender.com
+    sameSite: 'None', 
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+  
+  console.log('✅ Login success:', user.username);
+
+
     console.log('✅ Login success:', user.username);
     res.json({ success: true });
   } catch (error) {
