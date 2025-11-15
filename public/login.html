@@ -15,15 +15,15 @@
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
     <div class="container">
       <a class="navbar-brand fw-bold" href="index.html">Movies App</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav">
+      <div class="collapse navbar-collapse" id="navbarCollapse">
+        <ul class="navbar-nav ms-auto">
           <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
           <li class="nav-item"><a class="nav-link" href="signup.html">Sign Up</a></li>
           <li class="nav-item"><a class="nav-link active" href="login.html">Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">Movie Content</a></li>
+          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">Movies</a></li>
           <li class="nav-item"><a class="nav-link" href="profile.html">Profile</a></li>
         </ul>
       </div>
@@ -38,15 +38,15 @@
           <form id="loginForm">
             <div class="mb-3">
               <label for="login" class="form-label">Username or Email</label>
-              <input type="text" class="form-control" id="login" value="joe20" required>
+              <input type="text" class="form-control" id="login" required>
             </div>
             <div class="mb-3">
               <label for="password" class="form-label">Password</label>
-              <input type="password" class="form-control" id="password" value="password" required>
+              <input type="password" class="form-control" id="password" required>
             </div>
             <div class="mb-3">
               <label for="mnemonic" class="form-label">Mnemonic (12 words)</label>
-              <input type="text" class="form-control" id="mnemonic" value="horse dog ice queen orange rabbit banana banana pear apple cat horse" required>
+              <input type="text" class="form-control" id="mnemonic" required>
             </div>
             <button type="submit" class="btn btn-primary w-100">Login</button>
           </form>
@@ -56,11 +56,10 @@
   </div>
 
   <!-- ============================================================= -->
-  <!-- 1. Import setToken from auth.js (with ./) -->
-  <!-- 2. type="module" required -->
+  <!-- LOGIN SCRIPT – uses setToken from auth.js -->
   <!-- ============================================================= -->
   <script type="module">
-    import { setToken } from './protected/js/auth.js';   // ← WORKS NOW
+    import { setToken } from './protected/js/auth.js';
 
     const API_URL = 'https://authappmain.onrender.com';
 
@@ -71,8 +70,6 @@
       const password = document.getElementById('password').value;
       const mnemonic = document.getElementById('mnemonic').value.trim();
 
-      console.log('LOGIN – attempting login for:', login);
-
       try {
         const response = await fetch(`${API_URL}/login`, {
           method: 'POST',
@@ -81,18 +78,17 @@
         });
 
         const data = await response.json();
-        console.log('LOGIN – response:', data);
+        console.log('LOGIN response:', data);
 
         if (data.success && data.token) {
-          setToken(data.token);                     // ← NOW WORKS
-          console.log('LOGIN – success, redirecting...');
+          setToken(data.token);
           window.location.href = 'profile.html';
         } else {
-          alert('Login failed: ' + (data.error || 'Check credentials'));
+          alert('Login failed: ' + (data.error || 'Invalid credentials'));
         }
       } catch (err) {
-        console.error('LOGIN – network error:', err);
-        alert('Network error');
+        console.error('LOGIN error:', err);
+        alert('Network error. Check internet.');
       }
     });
   </script>
