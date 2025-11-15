@@ -3,38 +3,49 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const cors = require('cors');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); // Set in Render
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-prod';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-2025';
 
+// === CORS ===
 app.use(cors({
   origin: 'https://techsport.app',
   credentials: true
 }));
 app.use(express.json());
 
-// MySQL Pool
-const pool = mysql.createPool({
-  host: process.env.MYSQLHOST,
-  user: process.env.MYSQLUSER,
-  password: process.env.MYSQLPASSWORD,
-  database: process.env.MYSQLDATABASE,
-  port: process.env.MYSQLPORT || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+// === MYSQL POOL ===
+let pool;
+async function initDb() {
+  pool = mysql.createPool({
+    host: process.env.MYSQLHOST,
+    user: process.env.MYSQLUSER,
+    password: process.env.MYSQLPASSWORD,
+    database: process.env.MYSQLDATABASE,
+    port: process.env.MYSQLPORT || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+  });
 
-// Middleware: Verify JWT
-async function authenticateToken(req, res, next) {
+  // Test connection
+  try {
+    const conn = await pool.getConnection();
+    console.log('MySQL connected');
+    conn.release();
+  } catch (err) {
+    console.error('MySQL connection failed:', err);
+    process.exit(1);
+  }
+}
+
+// === AUTH MIDDLEWARE ===
+function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-
   if (!token) return res.status(401).json({ error: 'No token' });
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
@@ -44,7 +55,9 @@ async function authenticateToken(req, res, next) {
   });
 }
 
-// Health Check
+// === ROUTES ===
+
+// Health
 app.get('/', (req, res) => res.json({ status: 'API running' }));
 
 // SIGNUP
@@ -82,6 +95,7 @@ app.post('/login', async (req, res) => {
       'SELECT id, password_hash, mnemonic FROM users WHERE username = ? OR email = ?',
       [login, login]
     );
+
     if (users.length === 0) return res.status(400).json({ error: 'Invalid credentials' });
 
     const user = users[0];
@@ -101,12 +115,12 @@ app.post('/login', async (req, res) => {
 // PROFILE
 app.get('/profile', authenticateToken, async (req, res) => {
   try {
-    const [users] = await pool.query(
+    const [rows] = await pool.query(
       'SELECT username, email, subscription_active FROM users WHERE id = ?',
       [req.userId]
     );
-    if (users.length === 0) return res.status(404).json({ error: 'User not found' });
-    res.json(users[0]);
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(rows[0]);
   } catch (err) {
     console.error('Profile error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -116,41 +130,28 @@ app.get('/profile', authenticateToken, async (req, res) => {
 // CHECK SUBSCRIPTION
 app.get('/check-subscription', authenticateToken, async (req, res) => {
   try {
-    const [users] = await pool.query(
-      'SELECT subscription_active FROM users WHERE id = ?',
-      [req.userId]
-    );
-    if (users.length === 0) return res.status(404).json({ error: 'User not found' });
-    res.json({ active: users[0].subscription_active });
+    const [rows] = await pool.query('SELECT subscription_active FROM users WHERE id = ?', [req.userId]);
+    res.json({ active: rows[0]?.subscription_active || false });
   } catch (err) {
     console.error('Check sub error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// CREATE CHECKOUT SESSION
+// CREATE CHECKOUT
 app.post('/create-checkout-session', authenticateToken, async (req, res) => {
   const { type } = req.body;
-  if (!type || !['WEEKLY', 'MONTHLY'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
-
-  const prices = {
-    WEEKLY: 'price_1QExampleWeekly123',
-    MONTHLY: 'price_1QExampleMonthly123'
-  };
+  const prices = { WEEKLY: 'price_1YourWeeklyID', MONTHLY: 'price_1YourMonthlyID' };
 
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      line_items: [{
-        price: prices[type],
-        quantity: 1,
-      }],
+      line_items: [{ price: prices[type], quantity: 1 }],
       mode: 'subscription',
       success_url: `https://techsport.app/streampaltest/public/success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://techsport.app/streampaltest/public/profile.html`,
-      client_reference_id: req.userId.toString(),
+      client_reference_id: req.userId.toString()
     });
-
     res.json({ url: session.url });
   } catch (err) {
     console.error('Stripe error:', err);
@@ -158,22 +159,19 @@ app.post('/create-checkout-session', authenticateToken, async (req, res) => {
   }
 });
 
-// CONFIRM SUBSCRIPTION (called from success.html)
+// CONFIRM SUBSCRIPTION
 app.post('/confirm-subscription', authenticateToken, async (req, res) => {
   const { session_id } = req.body;
   if (!session_id) return res.status(400).json({ error: 'Missing session_id' });
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(session_id);
-    if (session.payment_status !== 'paid') {
-      return res.status(400).json({ error: 'Payment not completed' });
-    }
+    const sessionainable = await stripe.checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== 'paid') return res.status(400).json({ error: 'Not paid' });
 
     await pool.query(
       'UPDATE users SET subscription_active = TRUE, stripe_session_id = ? WHERE id = ?',
       [session_id, req.userId]
     );
-
     res.json({ success: true });
   } catch (err) {
     console.error('Confirm error:', err);
@@ -181,27 +179,23 @@ app.post('/confirm-subscription', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE SUBSCRIPTION
-app.post('/delete-subscription', authenticateToken, async (req, res) => {
+// CANCEL SUBSCRIPTION
+app.post('/delete-subscription',authenticateToken, async (req, res) => {
   try {
-    await pool.query(
-      'UPDATE users SET subscription_active = FALSE, stripe_session_id = NULL WHERE id = ?',
-      [req.userId]
-    );
+    await pool.query('UPDATE users SET subscription_active = FALSE, stripe_session_id = NULL WHERE id = ?', [req.userId]);
     res.json({ success: true });
   } catch (err) {
-    console.error('Cancel error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Generate 12-word mnemonic
+// Mnemonic
 function generateMnemonic() {
-  const words = ['apple', 'banana', 'cat', 'dog', 'elephant', 'fish', 'grape', 'horse', 'ice', 'jungle', 'kiwi', 'lemon', 'mango', 'orange', 'pear', 'queen', 'rabbit', 'strawberry', 'tiger', 'umbrella', 'violet', 'watermelon', 'xray', 'yellow', 'zebra'];
-  return Array.from({ length: 12 }, () => words[Math.floor(Math.random() * words.length)]).join(' ');
+  const words = ['apple','banana','cat','dog','elephant','fish','grape','horse','ice','jungle','kiwi','lemon','mango','orange','pear','queen','rabbit','strawberry','tiger','umbrella','violet','watermelon','xray','yellow','zebra'];
+  return Array.from({length:12},()=>words[Math.floor(Math.random()*words.length)]).join(' ');
 }
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// === START ===
+initDb().then(() => {
+  app.listen(PORT, () => console.log(`Server on ${PORT}`));
 });
