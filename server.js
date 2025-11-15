@@ -42,7 +42,7 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'https://techsport.app',
   'https://www.techsport.app',
-  'https://techsport.app/streampaltest/public',
+  'https://spauth.techsport.app',
   'https://authappmain.onrender.com',
   'https://movies-auth-app.onrender.com'
 ];
@@ -160,7 +160,7 @@ async function checkSubscription(req, res, next) {
     if (!rows[0].subscription_active) {
       console.log('❌ Subscription check failed for user ID:', decoded.id, '- subscription_active:', rows[0].subscription_active);
       return res.status(403).send(`
-        <!DOCTYPE html>
+        <!DOCTYPE private_content>
         <html>
         <head>
           <title>Subscription Required</title>
@@ -200,15 +200,21 @@ app.use('/subscription', checkSubscription, express.static(path.join(__dirname, 
 // Other middleware
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
-// REMOVED app.use(express.static(path.join(__dirname, 'public'))); // This line was moved to the end.
 
-// Root route - explicitly defined routes must come before generic static serving.
+// 🔑 FIX 3: Expose the protected/js scripts to fix navigation/scripting issues
+app.use('/protected/js', express.static(path.join(__dirname, 'protected', 'js')));
+
+// Main static file serving is kept here, before API routes, as your error indicates this works for /profile to hit API
+app.use(express.static(path.join(__dirname, 'public')));
+
+
+// Root route
 app.get('/', (req, res) => {
   console.log('📄 Serving index.html');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Health check endpoint - explicitly defined routes must come before generic static serving.
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
@@ -329,22 +335,16 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '7d' });
-
-// ----------------------------------------------------
-  // ⚠️ FIX: Change SameSite to None and set Secure to true
-  // ----------------------------------------------------
-  res.cookie('authToken', token, {
-    httpOnly: true,
-    // Must be set to true for SameSite=None
-    secure: true, 
-    // This allows the cookie to be sent from techsport.app to authappmain.onrender.com
-    sameSite: 'None', 
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  });
-  
-  console.log('✅ Login success:', user.username);
-
-
+    
+    // 🔑 FIX 1 & 2: Set cookie with Secure=true, SameSite=None, and Path=/
+    res.cookie('authToken', token, {
+      httpOnly: true,
+      secure: true, // MUST be true for SameSite=None
+      sameSite: 'None', // Allows cross-domain cookie sending (from techsport.app to onrender.com)
+      path: '/', // Ensures the cookie is valid for the whole API domain, which is necessary.
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    
     console.log('✅ Login success:', user.username);
     res.json({ success: true });
   } catch (error) {
@@ -485,16 +485,6 @@ app.post('/logout', (req, res) => {
   console.log('✅ User logged out');
   res.json({ success: true });
 });
-
-// ----------------------------------------------------------------------
-// 🚨 FIX APPLIED: Moved static file serving to the very end of routing 🚨
-// ----------------------------------------------------------------------
-app.use(express.static(path.join(__dirname, 'public')));
-
-// 🔑 FIX: Expose the protected/js scripts via a specific route
-app.use('/protected/js', express.static(path.join(__dirname, 'protected', 'js')));
-
-
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
