@@ -1,43 +1,30 @@
-<!-- public/success.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Movies App - Payment Success</title>
+  <base href="/streampaltest/public/">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body {
-      background: linear-gradient(135deg, #1a3c34, #4b0082, #000000);
-      color: white;
-      padding-top: 80px;
-    }
-    .profile-header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border-radius: 20px;
-      padding: 40px;
-      margin-bottom: 30px;
-    }
-    .spinner-border {
-      margin: 20px auto;
-    }
+    body { background: linear-gradient(135deg, #1a3c34, #4b0082, #000000); color: white; padding-top: 80px; }
+    .profile-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px; padding: 40px; margin-bottom: 30px; }
   </style>
 </head>
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
     <div class="container">
-      <a class="navbar-brand fw-bold" href="/index.html">🎬 Movies App</a>
+      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="/index.html">🏠 Home</a></li>
-          <li class="nav-item"><a class="nav-link" href="/signup.html">📝 Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link" href="/login.html">🔐 Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="/subscription/movie_content.html">🌟 Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link" href="/profile.html">👤 Profile</a></li>
+          <li class="nav-item"><a class="nav-link" href="index.html">🏠 Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="signup.html">📝 Sign Up</a></li>
+          <li class="nav-item"><a class="nav-link" href="login.html">🔐 Login</a></li>
+          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">🌟 Movie Content</a></li>
+          <li class="nav-item"><a class="nav-link" href="profile.html">👤 Profile</a></li>
         </ul>
       </div>
     </div>
@@ -45,52 +32,34 @@
 
   <div class="container mt-5">
     <div class="row justify-content-center">
-      <div class="col-lg-6 text-center">
-        <div class="profile-header">
-          <h1 class="display-4">🎉 Payment Successful!</h1>
-          <p class="lead">Activating your subscription...</p>
-          <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Loading...</span>
-          </div>
-          <p id="statusMessage">Please wait...</p>
+      <div class="col-lg-6">
+        <div class="profile-header text-center">
+          <h1 class="display-4 mb-4">✅ Payment Successful!</h1>
+          <p class="lead">Your subscription has been activated. Enjoy premium movie content!</p>
+          <a href="profile.html" class="btn btn-primary btn-lg">Go to Profile</a>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="/protected/js/auth.js"></script>
+  <script src="protected/js/auth.js"></script>
   <script>
     async function verifySession() {
       const urlParams = new URLSearchParams(window.location.search);
       const sessionId = urlParams.get('session_id');
-      if (!sessionId) {
-        console.error('No session_id in URL');
-        document.getElementById('statusMessage').textContent = 'Error: No session ID';
-        setTimeout(() => window.location.href = '/profile.html', 2000);
-        return;
-      }
-
-      try {
-        console.log('Verifying session with sessionId:', sessionId);
-        const response = await fetch(`${API_URL}/verify-session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
-          credentials: 'include'
-        });
-        const data = await response.json();
-        console.log('Verify session response:', data);
-        if (data.active) {
-          document.getElementById('statusMessage').textContent = 'Subscription activated! Redirecting to profile...';
-          setTimeout(() => window.location.href = '/profile.html', 2000);
-        } else {
-          document.getElementById('statusMessage').textContent = 'Error: ' + (data.error || 'Failed to activate subscription');
-          setTimeout(() => window.location.href = '/profile.html', 2000);
+      if (sessionId) {
+        try {
+          const response = await authFetch('/verify-session', {
+            method: 'POST',
+            body: JSON.stringify({ sessionId })
+          });
+          const data = await response.json();
+          if (!data.active) {
+            alert('Subscription activation failed. Please contact support.');
+          }
+        } catch (error) {
+          alert('Failed to verify payment. Please check your profile.');
         }
-      } catch (error) {
-        console.error('Error verifying session:', error.message);
-        document.getElementById('statusMessage').textContent = 'Error: Failed to verify subscription';
-        setTimeout(() => window.location.href = '/profile.html', 2000);
       }
     }
 
