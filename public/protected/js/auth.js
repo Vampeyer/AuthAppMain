@@ -9,7 +9,9 @@ export function setToken(token) {
   console.log('setToken – JWT stored');
 }
 
-export function getToken() { return authToken; }
+export function getToken() {
+  return authToken;
+}
 
 export function clearToken() {
   authToken = null;
@@ -25,24 +27,25 @@ export async function authFetch(url, options = {}) {
 
   if (authToken) {
     headers['Authorization'] = `Bearer ${authToken}`;
+    console.log('authFetch – sending Bearer token');
   }
 
-  const response = await fetch(`${API_URL}${url}`, {
-    ...options,
-    headers,
-    credentials: 'omit'
-  });
+  try {
+    const response = await fetch(`${API_URL}${url}`, {
+      ...options,
+      headers,
+      credentials: 'omit'
+    });
 
-  console.log(`authFetch → ${url} [${response.status}]`);
-  return response;
+    console.log(`authFetch GET ${url} → ${response.status}`);
+    return response;
+  } catch (err) {
+    console.error('authFetch network error:', err);
+    throw err;
+  }
 }
 
 // Health check
-window.addEventListener('load', async () => {
-  try {
-    const r = await fetch(`${API_URL}/`);
-    console.log('API health:', r.status);
-  } catch (e) {
-    console.error('API down:', e.message);
-  }
-});
+fetch(`${API_URL}/`)
+  .then(r => console.log('API health –', r.status))
+  .catch(() => console.log('API health – offline'));
