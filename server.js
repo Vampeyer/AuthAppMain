@@ -42,7 +42,7 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'https://techsport.app',
   'https://www.techsport.app',
-  'https://spauth.techsport.app',
+  'https://techsport.app/streampaltest/public',
   'https://authappmain.onrender.com',
   'https://movies-auth-app.onrender.com'
 ];
@@ -490,6 +490,11 @@ app.post('/logout', (req, res) => {
 // 🚨 FIX APPLIED: Moved static file serving to the very end of routing 🚨
 // ----------------------------------------------------------------------
 app.use(express.static(path.join(__dirname, 'public')));
+
+// 🔑 FIX: Expose the protected/js scripts via a specific route
+app.use('/protected/js', express.static(path.join(__dirname, 'protected', 'js')));
+
+
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);

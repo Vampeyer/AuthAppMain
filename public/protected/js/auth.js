@@ -31,7 +31,7 @@ function getApiUrl() {
   return 'https://authappmain.onrender.com';
 }
 
-const API_URL = getApiUrl();
+let API_URL = getApiUrl();
 console.log('API_URL set to:', API_URL);
 
 // Test API connection on page load

@@ -90,7 +90,11 @@
 
         const response = await fetch(`${API_URL}/profile`, {
           method: 'GET',
-          credentials: 'include'
+          credentials: 'include',
+          // Must be set to true for SameSite=None
+          secure: true, 
+    // This allows the cookie to be sent from techsport.app to authappmain.onrender.com
+          sameSite: 'None',
         });
         console.log('Profile response status:', response.status);
         
