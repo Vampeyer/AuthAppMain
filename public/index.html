@@ -17,17 +17,17 @@
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
     <div class="container">
-      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
+      <a class="navbar-brand fw-bold" href="index.html">Movies App</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
+      <div class="collapse navbar-collapse" id="#navbarNav">
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link active" href="index.html">🏠 Home</a></li>
-          <li class="nav-item"><a class="nav-link" href="signup.html">📝 Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link" href="login.html">🔐 Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">🌟 Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link" href="profile.html">👤 Profile</a></li>
+          <li class="nav-item"><a class="nav-link active" href="index.html">Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="signup.html">Sign Up</a></li>
+          <li class="nav-item"><a class="nav-link" href="login.html">Login</a></li>
+          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">Movie Content</a></li>
+          <li class="nav-item"><a class="nav-link" href="profile.html">Profile</a></li>
         </ul>
       </div>
     </div>
@@ -37,40 +37,34 @@
     <div class="row justify-content-center">
       <div class="col-lg-8 text-center">
         <div class="profile-header">
-          <h1 class="display-4">🎥 Welcome to Movies App</h1>
+          <h1 class="display-4">Welcome to Movies App</h1>
           <p class="lead">Discover amazing movies! Subscribe for movie content access.</p>
           <p>Premium Status: <span id="subscriptionStatus" class="status-badge red">No</span></p>
           <div class="mt-4">
-            <a href="profile.html" class="btn btn-primary btn-lg">📝 Manage Subscription</a>
-            <a href="login.html" class="btn btn-success btn-lg ms-3">🔐 Login</a>
+            <a href="profile.html" class="btn btn-primary btn-lg">Manage Subscription</a>
+            <a href="login.html" class="btn btn-success btn-lg ms-3">Login</a>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="protected/js/auth.js"></script>
-  <script>
-    let isChecking = false;
+  <script type="module">
+    import { authFetch } from './protected/js/auth.js';
 
     async function checkSubscription() {
-      if (isChecking) return;
-      isChecking = true;
       try {
-        const response = await authFetch('/profile');
-        if (response.status === 401) throw new Error('Not logged in');
-        const data = await response.json();
-        const statusSpan = document.getElementById('subscriptionStatus');
-        statusSpan.textContent = data.subscription_active ? 'Yes' : 'No';
-        statusSpan.classList.toggle('green', data.subscription_active);
-        statusSpan.classList.toggle('red', !data.subscription_active);
-      } catch (error) {
+        const r = await authFetch('/profile');
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const s = document.getElementById('subscriptionStatus');
+        s.textContent = d.subscription_active ? 'Yes' : 'No';
+        s.classList.toggle('green', d.subscription_active);
+        s.classList.toggle('red', !d.subscription_active);
+      } catch (e) {
         document.getElementById('subscriptionStatus').textContent = 'No';
-      } finally {
-        isChecking = false;
       }
     }
-
     window.addEventListener('load', checkSubscription);
   </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
