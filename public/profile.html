@@ -1,158 +1,26 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Movies App - Profile</title>
-  <base href="/streampaltest/public/">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background: linear-gradient(135deg, #1a3c34, #4b0082, #000000); color: white; padding-top: 80px; }
-    .profile-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px; padding: 40px; margin-bottom: 30px; }
-    .status-badge { display: inline-block; padding: 0.5rem 1.5rem; border-radius: 20px; font-size: 1.1rem; font-weight: bold; }
-    .green { background-color: #28a745; color: white; }
-    .red { background-color: #dc3545; color: white; }
-    .orange { background-color: #ff8c00; color: white; }
-  </style>
-</head>
-<body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-    <div class="container">
-      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="index.html">🏠 Home</a></li>
-          <li class="nav-item"><a class="nav-link" href="signup.html">📝 Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link" href="login.html">🔐 Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">🌟 Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link active" href="profile.html">👤 Profile</a></li>
-        </ul>
-      </div>
-    </div>
-  </nav>
+<script type="module">
+  import { authFetch, clearToken } from './protected/js/auth.js?v=20251115';
 
-  <div class="container mt-5">
-    <div class="row justify-content-center">
-      <div class="col-lg-6">
-        <div class="profile-header text-center">
-          <h1 class="display-4 mb-4">👤 User Profile</h1>
-          <p><strong>Username:</strong> <span id="username">Not Logged In</span></p>
-          <p><strong>Email:</strong> <span id="email">Not Logged In</span></p>
-          <p><strong>Subscription:</strong> <span id="subscriptionStatus" class="status-badge orange">Not Logged In</span></p>
-          
-          <!-- Logged in section - hidden by default -->
-          <div id="loggedInSection" style="display: none;">
-            <div class="mt-4">
-              <button id="subscribeWeeklyBtn" class="btn btn-primary me-2">Subscribe Weekly (7 Days - $2.95)</button>
-              <button id="subscribeMonthlyBtn" class="btn btn-primary me-2">Subscribe Monthly (30 Days - $7.75)</button>
-              <button id="cancelSubscriptionBtn" class="btn btn-danger">Cancel Subscription</button>
-            </div>
-            <div class="mt-4">
-              <button id="logoutBtn" class="btn btn-warning">Logout</button>
-            </div>
-          </div>
-          
-          <!-- Not logged in section - shown by default -->
-          <div id="notLoggedInSection" class="mt-4">
-            <p class="lead">Please log in to manage your subscription</p>
-            <a href="login.html" class="btn btn-success btn-lg">🔐 Login</a>
-            <a href="signup.html" class="btn btn-info btn-lg ms-2">📝 Sign Up</a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+  async function loadProfile() {
+    try {
+      const res = await authFetch('/profile');
+      if (res.status === 401) { clearToken(); window.location.href = 'login.html'; return; }
+      const data = await res.json();
 
-  <script src="protected/js/auth.js"></script>
-  <script>
-    async function loadProfile() {
-      try {
-        const response = await authFetch('/profile');
-        if (response.status === 401) {
-          showNotLoggedIn();
-          return;
-        }
-        const data = await response.json();
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('profileData').style.display = 'block';
 
-        document.getElementById('username').textContent = data.username;
-        document.getElementById('email').textContent = data.email;
-        const statusSpan = document.getElementById('subscriptionStatus');
-        statusSpan.textContent = data.subscription_active ? 'Active' : 'Inactive';
-        statusSpan.classList.remove('orange');
-        statusSpan.classList.toggle('green', data.subscription_active);
-        statusSpan.classList.toggle('red', !data.subscription_active);
+      document.getElementById('username').textContent = data.username;
+      document.getElementById('email').textContent = data.email;
 
-        document.getElementById('loggedInSection').style.display = 'block';
-        document.getElementById('notLoggedInSection').style.display = 'none';
-
-        document.getElementById('subscribeWeeklyBtn').disabled = data.subscription_active;
-        document.getElementById('subscribeMonthlyBtn').disabled = data.subscription_active;
-        document.getElementById('cancelSubscriptionBtn').disabled = !data.subscription_active;
-      } catch (error) {
-        showNotLoggedIn();
-      }
+      const statusEl = document.getElementById('subscriptionStatus');
+      statusEl.textContent = data.subscription_active ? 'Active' : 'Inactive';
+      statusEl.classList.toggle('green', data.subscription_active);
+      statusEl.classList.toggle('red', !data.subscription_active);
+    } catch (err) {
+      document.getElementById('error').style.display = 'block';
     }
+  }
 
-    function showNotLoggedIn() {
-      document.getElementById('username').textContent = 'Not Logged In';
-      document.getElementById('email').textContent = 'Not Logged In';
-      document.getElementById('subscriptionStatus').textContent = 'Not Logged In';
-      document.getElementById('subscriptionStatus').className = 'status-badge orange';
-      document.getElementById('loggedInSection').style.display = 'none';
-      document.getElementById('notLoggedInSection').style.display = 'block';
-    }
-
-    async function subscribe(type) {
-      try {
-        const response = await authFetch('/create-checkout-session', {
-          method: 'POST',
-          body: JSON.stringify({ type })
-        });
-        const data = await response.json();
-        if (data.url) {
-          window.location.href = data.url;
-        } else {
-          alert('Failed to start subscription: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        alert('Failed to start subscription');
-      }
-    }
-
-    async function deleteSubscription() {
-      if (!confirm('Are you sure you want to cancel your subscription?')) return;
-      try {
-        const response = await authFetch('/delete-subscription', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-          alert('Subscription cancelled successfully');
-          loadProfile();
-        } else {
-          alert('Failed to cancel subscription: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        alert('Failed to cancel subscription');
-      }
-    }
-
-    function logout() {
-      clearToken();
-      window.location.href = 'login.html';
-    }
-
-    // Event listeners
-    document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('subscribeWeeklyBtn')?.addEventListener('click', () => subscribe('WEEKLY'));
-      document.getElementById('subscribeMonthlyBtn')?.addEventListener('click', () => subscribe('MONTHLY'));
-      document.getElementById('cancelSubscriptionBtn')?.addEventListener('click', deleteSubscription);
-      document.getElementById('logoutBtn')?.addEventListener('click', logout);
-    });
-
-    window.addEventListener('load', loadProfile);
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+  window.addEventListener('load', loadProfile);
+</script>

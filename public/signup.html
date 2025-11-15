@@ -9,23 +9,22 @@
   <style>
     body { background: linear-gradient(135deg, #1a3c34, #4b0082, #000000); color: white; padding-top: 80px; }
     .profile-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px; padding: 40px; margin-bottom: 30px; }
-    #passphraseMessage { font-size: 1.2rem; font-weight: bold; color: #ffcc00; margin-top: 1rem; }
   </style>
 </head>
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
     <div class="container">
-      <a class="navbar-brand fw-bold" href="index.html">🎬 Movies App</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <a class="navbar-brand fw-bold" href="index.html">Movies App</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link" href="index.html">🏠 Home</a></li>
-          <li class="nav-item"><a class="nav-link active" href="signup.html">📝 Sign Up</a></li>
-          <li class="nav-item"><a class="nav-link" href="login.html">🔐 Login</a></li>
-          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">🌟 Movie Content</a></li>
-          <li class="nav-item"><a class="nav-link" href="profile.html">👤 Profile</a></li>
+      <div class="collapse navbar-collapse" id="navbarCollapse">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
+          <li class="nav-item"><a class="nav-link active" href="signup.html">Sign Up</a></li>
+          <li class="nav-item"><a class="nav-link" href="login.html">Login</a></li>
+          <li class="nav-item"><a class="nav-link" href="subscription/movie_content.html">Movies</a></li>
+          <li class="nav-item"><a class="nav-link" href="profile.html">Profile</a></li>
         </ul>
       </div>
     </div>
@@ -35,7 +34,7 @@
     <div class="row justify-content-center">
       <div class="col-lg-6">
         <div class="profile-header">
-          <h1 class="display-4 text-center mb-4">📝 Sign Up</h1>
+          <h1 class="display-4 text-center mb-4">Create Account</h1>
           <form id="signupForm">
             <div class="mb-3">
               <label for="username" class="form-label">Username</label>
@@ -51,22 +50,27 @@
             </div>
             <button type="submit" class="btn btn-primary w-100">Sign Up</button>
           </form>
-          <p id="passphrase" class="mt-3 text-center"></p>
-          <p id="passphraseMessage" class="text-center"></p>
-          <div class="text-center mt-3">
-            <button id="continueBtn" class="btn btn-success d-none">Continue</button>
+          <div class="mt-3 text-center">
+            <p>Already have an account? <a href="login.html" class="text-light">Login</a></p>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="protected/js/auth.js"></script>
-  <script>
+  <!-- ============================================================= -->
+  <!-- SIGNUP SCRIPT – NO auth.js src, only import -->
+  <!-- ============================================================= -->
+  <script type="module">
+    import { setToken } from './protected/js/auth.js?v=20251115';
+
+    const API_URL = 'https://authappmain.onrender.com';
+
     document.getElementById('signupForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const username = document.getElementById('username').value;
-      const email = document.getElementById('email').value;
+
+      const username = document.getElementById('username').value.trim();
+      const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
 
       try {
@@ -75,25 +79,24 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, email, password })
         });
+
         const data = await response.json();
-        if (data.success) {
-          document.getElementById('passphrase').innerHTML = `Your 12 key passphrase (save this securely): <strong>${data.mnemonic}</strong>`;
-          document.getElementById('passphraseMessage').innerHTML = 'SAVE THIS PASSPHRASE!';
-          document.getElementById('continueBtn').classList.remove('d-none');
-          alert('Signup successful! Save your 12 key passphrase before continuing.');
+        console.log('SIGNUP response:', data);
+
+        if (data.success && data.token) {
+          setToken(data.token);
+          alert('Account created! Save your mnemonic:\n\n' + data.mnemonic);
+          window.location.href = 'profile.html';
         } else {
           alert('Signup failed: ' + (data.error || 'Unknown error'));
         }
-      } catch (error) {
-        console.error('Signup error:', error.message);
-        alert('Signup failed');
+      } catch (err) {
+        console.error('SIGNUP error:', err);
+        alert('Network error. Try again.');
       }
     });
-
-    document.getElementById('continueBtn').addEventListener('click', () => {
-      window.location.href = 'login.html';
-    });
   </script>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
