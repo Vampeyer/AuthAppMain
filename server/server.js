@@ -2,11 +2,11 @@
 
 
 // Load a specific .env file
-require('dotenv').config({ path: '.env.development' });
+//require('dotenv').config({ path: '.env.development' });
 
 // CHANGE .env file being used for development  / production  
 
-// require('dotenv').config({ path: '.env.production' });
+require('dotenv').config({ path: '.env.production' });
 //require('dotenv').config();
 
 console.log('=== SERVER STARTING ===');
