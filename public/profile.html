@@ -1,106 +1,164 @@
-<!-- public/profile.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Profile</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background: linear-gradient(135deg,#1a3c34,#4b0082,#000); color:#fff; padding-top:80px; }
-    .badge-active { background:#28a745; }
-    .badge-inactive { background:#dc3545; }
-  </style>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-    <div class="container">
-      <a class="navbar-brand" href="/index.html">Movies App</a>
-      <div class="collapse navbar-collapse">
-        <ul class="navbar-nav ms-auto">
-          <li class="nav-item"><a class="nav-link" href="/profile.html">Profile</a></li>
-          <li class="nav-item"><a class="nav-link" href="/subscription/movie_content.html">Movies</a></li>
-        </ul>
-      </div>
-    </div>
+
+  <nav>
+    <a href="/">Home</a>
+    <a href="/signup.html">Sign Up</a>
+    <a href="/login.html">Login</a>
+    <a href="/profile.html">Profile</a>
+    <a href="/subscriptions/premium.html">Premium Area</a>
   </nav>
 
-  <div class="container mt-5">
-    <div class="text-center">
-      <h1>User Profile</h1>
-      <p><strong>Username:</strong> <span id="username">…</span></p>
-      <p><strong>Email:</strong> <span id="email">…</span></p>
-      <p><strong>Subscription:</strong> <span id="subBadge" class="badge">…</span></p>
-
-      <div id="loggedIn" style="display:none;">
-        <button id="weeklyBtn" class="btn btn-primary me-2">Weekly $2.95</button>
-        <button id="monthlyBtn" class="btn btn-primary me-2">Monthly $7.75</button>
-        <button id="cancelBtn" class="btn btn-danger">Cancel</button>
-        <button id="logoutBtn" class="btn btn-warning mt-2">Logout</button>
-      </div>
-
-      <div id="notLoggedIn">
-        <a href="/login.html" class="btn btn-success">Login</a>
-        <a href="/signup.html" class="btn btn-info ms-2">Sign Up</a>
-      </div>
-    </div>
+  <div class="container">
+    <h2>User Profile</h2>
+    <div id="profile-content">Loading your profile...</div>
   </div>
 
-  <script src="/protected/js/auth.js"></script>
   <script>
+    const stripe = Stripe('pk_test_51SIBCAFF2HALdyFkP6v123abcDEF456ghiJKL789');
+
     async function loadProfile() {
       try {
-        const r = await fetch(`${API_URL}/profile`, { credentials: 'include' });
-        if (r.status === 401) return showNotLoggedIn();
-        const d = await r.json();
-        document.getElementById('username').textContent = d.username;
-        document.getElementById('email').textContent = d.email;
-        const badge = document.getElementById('subBadge');
-        badge.textContent = d.subscription_active ? 'Active' : 'Inactive';
-        badge.className = d.subscription_active ? 'badge badge-active' : 'badge badge-inactive';
-        document.getElementById('loggedIn').style.display = 'block';
-        document.getElementById('notLoggedIn').style.display = 'none';
+        const response = await fetch('/api/me', { credentials: 'include' });
+        if (!response.ok) {
+          throw new Error('Not logged in or server error');
+        }
+        const user = await response.json();
+        const active = user.subscription_active;
+        const daysLeft = user.days_left || 0;
 
-        document.getElementById('weeklyBtn').disabled = d.subscription_active;
-        document.getElementById('monthlyBtn').disabled = d.subscription_active;
-        document.getElementById('cancelBtn').disabled = !d.subscription_active;
-      } catch (e) { showNotLoggedIn(); }
-    }
-    function showNotLoggedIn() {
-      document.getElementById('username').textContent = 'Not logged in';
-      document.getElementById('email').textContent = '';
-      document.getElementById('subBadge').textContent = 'Not logged in';
-      document.getElementById('subBadge').className = 'badge';
-      document.getElementById('loggedIn').style.display = 'none';
-      document.getElementById('notLoggedIn').style.display = 'block';
+        document.getElementById('profile-content').innerHTML = `
+          <h3>Welcome, <strong>${user.username}</strong>!</h3>
+          <p>Email: ${user.email}</p>
+
+          <p style="font-size:1.6rem; margin:40px 0; text-align:center;">
+            Subscription: 
+            <span style="font-weight:bold; color:${active ? 'green' : 'red'};">
+              ${active ? 'ACTIVE' : 'INACTIVE'}
+            </span>
+          </p>
+
+          ${active ? `
+            <div style="text-align:center; margin:50px 0;">
+              <p style="color:green; font-size:2rem; margin-bottom:20px;">
+                Premium Access Active!
+              </p>
+              <p style="font-size:1.2rem; color:#333; margin-bottom:30px;">
+                Your subscription has ${daysLeft} days left.
+              </p>
+              <button onclick="cancelSubscription()" class="btn-danger" 
+                      style="padding:20px 50px; font-size:22px; font-weight:bold;">
+                CANCEL SUBSCRIPTION NOW
+              </button>
+              <p style="color:#888; margin-top:15px;">
+                Ends access immediately
+              </p>
+            </div>
+          ` : `
+            <div style="text-align:center; margin:50px 0;">
+              <h3>Upgrade to Premium</h3>
+              <button onclick="startCheckout('price_1SIBPkFF2HALdyFkogiGJG5w')" 
+                      class="btn-primary" style="padding:18px 40px; font-size:20px; margin:10px;">
+                Weekly – $2.95
+              </button>
+              <br>
+              <button onclick="startCheckout('price_1SIBCzFF2HALdyFk7vOxByGq')" 
+                      class="btn-success" style="padding:18px 40px; font-size:20px; margin:10px;">
+                Monthly – $7.75
+              </button>
+            </div>
+          `}
+
+          <hr style="margin:60px 0; border:0; height:1px; background:#ddd;">
+
+          <p style="text-align:center;">
+            <button onclick="logoutUser()" class="btn-danger" style="padding:14px 30px; font-size:18px;">
+              Logout
+            </button>
+          </p>
+        `;
+      } catch (error) {
+        document.getElementById('profile-content').innerHTML = `
+          <p style="color:red; text-align:center;">
+            <strong>Not Logged In</strong><br>
+            <a href="/login.html">Go to Login</a>
+          </p>
+        `;
+      }
     }
 
-    async function subscribe(type) {
-      const r = await fetch(`${API_URL}/create-checkout-session`, {
-        method:'POST', credentials:'include',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({type})
-      });
-      const d = await r.json();
-      if (d.url) location.href = d.url;
+    // Start checkout and redirect to Stripe
+    async function startCheckout(priceId) {
+      try {
+        const response = await fetch('/api/create-checkout-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ price_id: priceId })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Server error');
+        }
+
+        const data = await response.json();
+
+        if (data.url) {
+          window.location.href = data.url;  // Reliable redirect
+        } else {
+          throw new Error('No checkout URL provided');
+        }
+      } catch (error) {
+        alert('Failed to start checkout: ' + error.message);
+      }
     }
-    async function cancel() {
-      if (!confirm('Cancel subscription?')) return;
-      await fetch(`${API_URL}/delete-subscription`, {method:'POST', credentials:'include'});
+
+    // Cancel subscription
+    async function cancelSubscription() {
+      if (!confirm('Are you sure you want to cancel? Access ends immediately.')) return;
+      try {
+        const response = await fetch('/api/cancel-subscription-now', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        if (!response.ok) throw new Error('Cancel failed');
+        const data = await response.json();
+        if (data.success) {
+          alert('Subscription cancelled!');
+          location.reload();
+        } else {
+          alert('Error: ' + data.error);
+        }
+      } catch (error) {
+        alert('Failed to cancel: ' + error.message);
+      }
+    }
+
+    // Logout
+    async function logoutUser() {
+      try {
+        await fetch('/api/logout', { credentials: 'include' });
+        window.location.href = '/';
+      } catch (error) {
+        alert('Logout failed: ' + error.message);
+      }
+    }
+
+    // Auto-refresh after Stripe redirect to show updated status
+    if (window.location.search.includes('session_id')) {
+      setTimeout(() => window.location.href = '/profile.html', 1000);
+    } else {
       loadProfile();
     }
-    async function logout() {
-      await fetch(`${API_URL}/logout`, {method:'POST', credentials:'include'});
-      location.href='/login.html';
-    }
-
-    document.getElementById('weeklyBtn').onclick = ()=>subscribe('WEEKLY');
-    document.getElementById('monthlyBtn').onclick = ()=>subscribe('MONTHLY');
-    document.getElementById('cancelBtn').onclick = cancel;
-    document.getElementById('logoutBtn').onclick = logout;
-
-    window.addEventListener('load', loadProfile);
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
