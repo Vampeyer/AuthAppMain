@@ -18,9 +18,7 @@
 
   <div class="container">
     <h2>My Profile</h2>
-    <div id="content">
-      <p>Loading your account...</p>
-    </div>
+    <div id="content"><p>Loading...</p></div>
   </div>
 
 <script>
@@ -28,88 +26,74 @@ const BACKEND_URL = 'https://authappmain.onrender.com';
 
 async function loadProfile() {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/me`, {
-      credentials: 'include'
-    });
-
-    if (!res.ok) throw new Error('Not authenticated');
-
+    const res = await fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' });
+    if (!res.ok) throw 1;
     const u = await res.json();
 
     document.getElementById('content').innerHTML = `
       <h3>Welcome back, <strong>${u.username}</strong>!</h3>
       <p><strong>Email:</strong> ${u.email}</p>
       <p><strong>Subscription:</strong> 
-        <span style="color:${u.subscription_active ? 'green' : 'red'}; font-weight:bold;">
-          ${u.subscription_active 
-            ? `ACTIVE (${u.days_left} day${u.days_left !== 1 ? 's' : ''} left)` 
-            : 'INACTIVE'}
+        <span style="color:${u.subscription_active ? 'lime' : 'red'}; font-weight:bold;">
+          ${u.subscription_active ? `ACTIVE (${u.days_left} day${u.days_left > 1 ? 's' : ''} left)` : 'INACTIVE'}
         </span>
       </p>
 
-      <div style="margin: 25px 0;">
+      <div style="margin:30px 0;">
         ${u.subscription_active ? `
-          <button onclick="cancelSub()" 
-                  style="background:#d32f2f; color:white; padding:14px 28px; border:none; border-radius:6px; font-size:16px; cursor:pointer;">
-            Cancel Subscription Now
+          <button onclick="cancelSubscription()" 
+                  style="background:#d32f2f;color:white;padding:16px 32px;border:none;border-radius:8px;font-size:18px;cursor:pointer;">
+            ⚠️ Cancel Subscription Immediately
           </button>
         ` : `
-          <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" 
-                  style="background:#1976d2; color:white; padding:14px 28px; border:none; border-radius:6px; font-size:16px; cursor:pointer; margin-right:12px;">
+          <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:#1976d2;color:white;padding:16px 32px;border:none;border-radius:8px;font-size:18px;margin-right:12px;">
             Weekly – $2.95
           </button>
-          <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" 
-                  style="background:#388e3c; color:white; padding:14px 28px; border:none; border-radius:6px; font-size:16px; cursor:pointer;">
+          <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" style="background:#388e3c;color:white;padding:16px 32px;border:none;border-radius:8px;font-size:18px;">
             Monthly – $7.75
           </button>
         `}
       </div>
 
-      <p>
-        <button onclick="logout()" 
-                style="background:#555; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">
-          Logout
-        </button>
-      </p>
+      <p><button onclick="logout()" style="padding:10px 20px;">Logout</button></p>
     `;
 
-  } catch (err) {
-    document.getElementById('content').innerHTML = `
-      <p>Not logged in or session expired.</p>
-      <p><a href="login.html">→ Go to Login</a></p>
-    `;
+    // Success / Cancel messages from Stripe
+    const params = new URLSearchParams(location.search);
+    if (params.get('success') === 'true') {
+      document.getElementById('content').insertAdjacentHTML('afterbegin', 
+        '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;border:1px solid #c3e6cb;"><strong>🎉 Thank you!</strong> Your subscription is now active!</div>');
+      history.replaceState(null, '', location.pathname);
+    }
+    if (params.get('cancel') === 'true') {
+      document.getElementById('content').insertAdjacentHTML('afterbegin', 
+        '<div style="background:#f8d7da;color:#721c24;padding:16px;border-radius:8px;margin-bottom:20px;border:1px solid #f5c6cb;">Payment cancelled — no charges were made.</div>');
+      history.replaceState(null, '', location.pathname);
+    }
+
+  } catch {
+    document.getElementById('content').innerHTML = '<p>Not logged in → <a href="login.html">Login</a></p>';
   }
 }
 
 function buy(priceId) {
   fetch(`${BACKEND_URL}/api/create-checkout-session`, {
-    method: 'POST',
-    credentials: 'include',
+    method: 'POST', credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ price_id: priceId })
   })
   .then(r => r.json())
-  .then(data => {
-    if (data.url) {
-      location.href = data.url;
-    } else {
-      alert('Error creating checkout session');
-    }
-  })
-  .catch(() => alert('Network error'));
+  .then(d => d.url && (location.href = d.url));
 }
 
-function cancelSub() {
-  if (confirm('Are you sure you want to cancel your subscription immediately?\n\nThis cannot be undone.')) {
-    fetch(`${BACKEND_URL}/api/cancel-subscription-now`, {
-      method: 'POST',
-      credentials: 'include'
-    })
-    .then(() => {
-      alert('Subscription cancelled successfully.');
-      loadProfile();
-    })
-    .catch(() => alert('Error cancelling subscription'));
+function cancelSubscription() {
+  if (confirm('⚠️ Are you sure you want to cancel your subscription immediately?\n\nThis cannot be undone and you will lose access right now.')) {
+    fetch(`${BACKEND_URL}/api/cancel-subscription-now`, { method: 'POST', credentials: 'include' })
+      .then(() => {
+        alert('Subscription cancelled.');
+        loadProfile();
+      })
+      .catch(() => alert('Error cancelling subscription'));
   }
 }
 
@@ -118,9 +102,7 @@ function logout() {
     .then(() => location.href = 'login.html');
 }
 
-// Load profile immediately
 loadProfile();
 </script>
-
 </body>
 </html>
