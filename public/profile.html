@@ -68,5 +68,37 @@ function logout() {
 
 load();
 </script>
+
+
+
+<script>
+
+console.log('Profile page loaded');
+console.log('Cookies sent:', document.cookie);
+console.log('Fetching from:', BACKEND_URL + '/api/me');
+
+fetch(`${BACKEND_URL}/api/me`, { 
+  credentials: 'include' 
+})
+.then(r => {
+  console.log('Status:', r.status);
+  console.log('Headers:', [...r.headers.entries()]);
+  return r.json();
+})
+.then(data => {
+  console.log('SUCCESS → User data:', data);
+  document.getElementById('content').innerHTML = `
+    <h3>Welcome <strong>${data.username}</strong>!</h3>
+    <p>Email: ${data.email}</p>
+    <p>Status: <span style="color:green">ACTIVE</span></p>
+  `;
+})
+.catch(err => {
+  console.error('FAILED → Not logged in or server error', err);
+  document.getElementById('content').innerHTML = 'Not logged in → <a href="login.html">Login</a>';
+});
+</script>
+
+
 </body>
 </html>

@@ -2,3 +2,6 @@
 .env.production
 .env.development
 nodemodules
+
+        // secure: !isLocalhost,           // ← ONLY secure in production
+        // sameSite: isLocalhost ? 'lax' : 'none',  // ← lax for localhost
