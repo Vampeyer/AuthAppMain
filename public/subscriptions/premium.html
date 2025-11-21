@@ -1,6 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Premium Content</title>
+  <base href="/streampaltest/public/">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav>
+    <a href="index.html">Home</a> | <a href="profile.html">Profile</a> | <a href="subscriptions/premium.html">Premium</a>
+  </nav>
+  <div class="container" id="premium" style="display:none">
+    <h1>PREMIUM UNLOCKED</h1>
+    <p>Congratulations! You have full access.</p>
+  </div>
+
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-console.log('Premium → Backend:', BACKEND_URL);
 
 fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' })
   .then(r => r.ok ? r.json() : Promise.reject())
@@ -9,13 +25,10 @@ fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' })
       document.getElementById('premium').style.display = 'block';
     } else {
       alert('Subscription required');
-      location.href = '/profile.html';
+      location.href = 'profile.html';
     }
   })
-  .catch(() => location.href = '/login.html');
+  .catch(() => location.href = 'login.html');
 </script>
-
-<div id="premium" style="display:none">
-  <h1>PREMIUM CONTENT UNLOCKED</h1>
-  <p>You have access!</p>
-</div>
+</body>
+</html>

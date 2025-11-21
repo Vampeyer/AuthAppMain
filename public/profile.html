@@ -3,76 +3,70 @@
 <head>
   <meta charset="UTF-8">
   <title>Profile</title>
-  <!-- THIS FIXES ALL YOUR PROBLEMS -->
   <base href="/streampaltest/public/">
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="css/styles.css">
   <script src="https://js.stripe.com/v3/"></script>
-  <script>
-    const BACKEND_URL = 'https://authappmain.onrender.com';
-    console.log('Profile → Backend:', BACKEND_URL);
-  </script>
 </head>
 <body>
   <nav>
-    <a href="/">Home</a>
-    <a href="/profile.html">Profile</a>
-    <a href="/subscriptions/premium.html">Premium</a>
+    <a href="index.html">Home</a> | <a href="profile.html">Profile</a> | <a href="subscriptions/premium.html">Premium</a>
   </nav>
-
   <div class="container">
     <h2>Profile</h2>
     <div id="content">Loading...</div>
   </div>
 
-  <script>
-    async function load() {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' });
-        if (!res.ok) throw new Error();
-        const u = await res.json();
-        const active = u.subscription_active;
-        const days = u.days_left || 0;
+<script>
+const BACKEND_URL = 'https://authappmain.onrender.com';
 
-        document.getElementById('content').innerHTML = `
-          <h3>Welcome <strong>${u.username}</strong></h3>
-          <p>Email: ${u.email}</p>
-          <p>Status: <strong style="color:${active?'green':'red'}">${active?'ACTIVE':'INACTIVE'}</strong></p>
-          ${active ? `
-            <p>Your subscription has <strong>${days} days</strong> left</p>
-            <button onclick="cancel()" style="background:red;color:white;padding:15px 30px;font-size:18px;border:none;border-radius:8px">
-              CANCEL NOW
-            </button>
-          ` : `
-            <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:blue;color:white;padding:15px 30px;margin:10px;font-size:18px;border:none;border-radius:8px">Weekly $2.95</button>
-            <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" style="background:green;color:white;padding:15px 30px;margin:10px;font-size:18px;border:none;border-radius:8px">Monthly $7.75</button>
-          `}
-          <p><button onclick="fetch('${BACKEND_URL}/api/logout',{credentials:'include'}).then(()=>location.href='/')" style="background:#333;color:white;padding:12px 24px;margin-top:30px;border:none;border-radius:8px">Logout</button></p>
-        `;
-      } catch {
-        document.getElementById('content').innerHTML = '<p>Not logged in → <a href="/login.html">Login</a></p>';
-      }
-    }
+async function load() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' });
+    if (!res.ok) throw 1;
+    const u = await res.json();
 
-    function buy(id) {
-      fetch(`${BACKEND_URL}/api/create-checkout-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ price_id: id })
-      })
-      .then(r => r.json())
-      .then(d => d.url && (location.href = d.url));
-    }
+    document.getElementById('content').innerHTML = `
+      <h3>Welcome <strong>${u.username}</strong>!</h3>
+      <p>Email: ${u.email}</p>
+      <p>Status: <strong style="color:${u.subscription_active?'green':'red'}">
+        ${u.subscription_active ? 'ACTIVE ('+u.days_left+' days left)' : 'INACTIVE'}
+      </strong></p>
+      ${u.subscription_active ? `
+        <button onclick="cancelSub()" style="background:red;color:white;padding:12px 24px">Cancel Subscription</button>
+      ` : `
+        <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:#0066ff;color:white;padding:12px 24px">Weekly $2.95</button>
+        <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" style="background:#00aa00;color:white;padding:12px 24px">Monthly $7.75</button>
+      `}
+      <p><button onclick="logout()" style="margin-top:20px">Logout</button></p>
+    `;
+  } catch {
+    document.getElementById('content').innerHTML = 'Not logged in → <a href="login.html">Login</a>';
+  }
+}
 
-    function cancel() {
-      if (confirm('Cancel subscription immediately?')) {
-        fetch(`${BACKEND_URL}/api/cancel-subscription-now`, { method: 'POST', credentials: 'include' })
-          .then(() => { alert('Cancelled!'); location.reload(); });
-      }
-    }
+function buy(id) {
+  fetch(`${BACKEND_URL}/api/create-checkout-session`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ price_id: id })
+  })
+  .then(r => r.json())
+  .then(d => d.url && (location.href = d.url));
+}
 
-    if (location.search.includes('session_id')) setTimeout(() => location.href = '/profile.html', 1500);
-    load();
-  </script>
+function cancelSub() {
+  if (confirm('Cancel immediately?')) {
+    fetch(`${BACKEND_URL}/api/cancel-subscription-now`, { method: 'POST', credentials: 'include' })
+      .then(() => { alert('Cancelled'); location.reload(); });
+  }
+}
+
+function logout() {
+  fetch(`${BACKEND_URL}/api/logout`, { credentials: 'include' })
+    .then(() => location.href = 'login.html');
+}
+
+load();
+</script>
 </body>
 </html>

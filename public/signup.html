@@ -3,76 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <title>Sign Up</title>
-
-  <!-- THIS FIXES ALL YOUR PROBLEMS -->
   <base href="/streampaltest/public/">
-
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-<nav>
-  <a href="/">Home</a>
-  <a href="/signup.html">Sign Up</a>
-  <a href="/login.html">Login</a>
-  <a href="/profile.html">Profile</a>
-  <a href="/subscriptions/premium.html">Premium Area</a>
-</nav>
-
-<div class="container">
-  <h2>Create Account</h2>
-  <input type="text" id="username" placeholder="Username" required>
-  <input type="email" id="email" placeholder="Email" required>
-  <input type="password" id="password" placeholder="Password" required>
-  <button class="btn-primary" onclick="signup()">Create Account</button>
-  <div id="result"></div>
-</div>
+  <nav>
+    <a href="index.html">Home</a> | <a href="signup.html">Sign Up</a> | <a href="login.html">Login</a>
+  </nav>
+  <div class="container">
+    <h2>Create Account</h2>
+    <input type="text" id="username" placeholder="Username"><br><br>
+    <input type="email" id="email" placeholder="Email"><br><br>
+    <input type="password" id="password" placeholder="Password"><br><br>
+    <button onclick="signup()">Create Account</button>
+    <div id="result"></div>
+  </div>
 
 <script>
-// ———————————————————————————————————————
-// PRODUCTION BACKEND URL (Render)
-// ———————————————————————————————————————
 const BACKEND_URL = 'https://authappmain.onrender.com';
-console.log('%cSIGNUP PAGE → Connecting to backend:', 'color:cyan;font-weight:bold', BACKEND_URL);
 
-// ———————————————————————————————————————
-// SIGNUP FUNCTION — FULL LOGS
-// ———————————————————————————————————————
 async function signup() {
-  const username = document.getElementById('username').value.trim();
-  const email    = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
+  const data = {
+    username: document.getElementById('username').value.trim(),
+    email: document.getElementById('email').value.trim(),
+    password: document.getElementById('password').value
+  };
 
-  if (!username || !email || !password) {
-    return alert('All fields are required');
-  }
+  const res = await fetch(`${BACKEND_URL}/api/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }).then(r => r.json());
 
-  console.log('%cSENDING SIGNUP REQUEST →', 'color:orange;font-weight:bold', { username, email });
-
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email, password })
-    });
-
-    const data = await response.json();
-    console.log('%cSERVER RESPONSE →', 'color:lime;font-weight:bold', data);
-
-    if (data.success) {
-      document.getElementById('result').innerHTML = `
-        <div style="background:#e6ffe6;padding:15px;border-radius:8px;margin-top:20px;">
-          <h3 style="color:green">Account created!</h3>
-          <p><strong>Save your recovery phrase:</strong></p>
-          <pre style="background:#f0f0f0;padding:12px;border-radius:6px;overflow-x:auto;">${data.phrase}</pre>
-          <p>→ <a href="/login.html">Go to Login</a></p>
-        </div>
-      `;
-    } else {
-      alert('Error: ' + (data.error || 'Unknown error'));
-    }
-  } catch (err) {
-    console.error('%cFETCH FAILED →', 'color:red', err);
-    alert('Cannot reach server. Check internet or backend.');
+  if (res.success) {
+    document.getElementById('result').innerHTML = `
+      <p style="color:green">Account created!</p>
+      <p><strong>Recovery phrase:</strong><br>
+      <code style="background:#f0f0f0;padding:10px;display:block">${res.phrase}</code></p>
+      <p><a href="login.html">→ Go to Login</a></p>
+    `;
+  } else {
+    alert(res.error || 'Error');
   }
 }
 </script>
