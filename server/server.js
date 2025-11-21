@@ -120,10 +120,16 @@ app.post('/api/login', async (req, res) => {
 
     if (passMatch && phraseMatch) {
       res.cookie('jwt', generateToken(user.id), {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        httpOnly: true,   // JavaScript cannot access this cookie // USE: Always true for auth tokens
+        secure: true, // HTTPS  ONLY CONNECTIONS
+        sameSite: 'none',  
+
+        // secure: !isLocalhost,           // ← ONLY secure in production
+        // sameSite: isLocalhost ? 'lax' : 'none',  // ← lax for localhost
+
+
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/"
       });
       console.log('LOGIN SUCCESS → User ID:', user.id);
       return res.json({ success: true });

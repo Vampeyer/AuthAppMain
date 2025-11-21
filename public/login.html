@@ -3,11 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <title>Login</title>
+  
+  <!-- FIXES ALL PATHS -->
+  <base href="/streampaltest/public/">
+  
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 <nav>
-  <a href="/">Home</a> | <a href="/signup.html">Sign Up</a> | <a href="/login.html">Login</a>
+  <a href="index.html">Home</a> | 
+  <a href="signup.html">Sign Up</a> | 
+  <a href="login.html">Login</a> | 
+  <a href="profile.html">Profile</a> | 
+  <a href="subscriptions/premium.html">Premium</a>
 </nav>
 
 <div class="container">
@@ -20,35 +28,34 @@
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-console.log('%cLOGIN PAGE → Backend:', 'color:cyan;font-weight:bold', BACKEND_URL);
+console.log('LOGIN PAGE → Backend:', BACKEND_URL);
 
 async function login() {
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value;
-  const phrase   = document.getElementById('phrase').value.trim();
-
-  console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
+  const data = {
+    username: document.getElementById('username').value.trim(),
+    password: document.getElementById('password').value,
+    phrase: document.getElementById('phrase').value.trim()
+  };
 
   try {
     const res = await fetch(`${BACKEND_URL}/api/login`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, phrase })
+      body: JSON.stringify(data)
     });
 
-    const data = await res.json();
-    console.log('%cLOGIN RESPONSE →', 'color:lime', data);
+    const json = await res.json();
+    console.log('Login response:', json);
 
-    if (data.success) {
-      console.log('LOGIN SUCCESS → Redirecting...');
-      location.href = '/profile.html';
+    if (json.success) {
+      console.log('LOGIN SUCCESS → Going to profile');
+      location.href = 'profile.html';  // ← NO leading slash!
     } else {
-      alert('Wrong username, password, or phrase');
+      alert('Wrong credentials');
     }
   } catch (err) {
-    console.error('%cLOGIN FAILED →', 'color:red', err);
-    alert('Server unreachable');
+    alert('Server error');
   }
 }
 </script>
