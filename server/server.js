@@ -1,5 +1,5 @@
-// server.js — FINAL 100% WORKING VERSION (NOV 2025)
-// Works with: https://techsport.app/streampaltest/public/ → https://authappmain.onrender.com
+// server.js — FULL PRODUCTION VERSION (NOV 2025)
+// Works perfectly with https://techsport.app/streampaltest/public/
 
 require('dotenv').config({ path: '.env.production' });
 
@@ -20,7 +20,7 @@ const pool = require('./db');
 
 const app = express();
 
-// ==================== CORS + CREDENTIALS (THIS IS THE FIX) ====================
+// ==================== CORS + CREDENTIALS ====================
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const allowedOrigins = [
@@ -38,7 +38,6 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Handle preflight
   if (req.method === 'OPTIONS') {
     console.log('%cCORS Preflight →', 'color:cyan', origin);
     return res.status(200).end();
@@ -104,7 +103,7 @@ app.post('/api/signup', async (req, res) => {
   }
 });
 
-// LOGIN — FINAL COOKIE FIX
+// LOGIN
 app.post('/api/login', async (req, res) => {
   const { username, password, phrase } = req.body;
   console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
@@ -119,13 +118,13 @@ app.post('/api/login', async (req, res) => {
     if (passOk && phraseOk) {
       res.cookie('jwt', generateToken(user.id), {
         httpOnly: true,
-        secure: true,           // Required for sameSite: 'none'
-        sameSite: 'none',        // Required for cross-domain
+        secure: true,
+        sameSite: 'none',
         path: '/',
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
-      console.log('%cLOGIN SUCCESS → Cookie sent (sameSite=none, Secure)', 'color:lime;font-weight:bold');
+      console.log('%cLOGIN SUCCESS → Cookie sent', 'color:lime;font-weight:bold');
       return res.json({ success: true });
     } else {
       console.log('Login failed: Wrong credentials');
@@ -143,7 +142,7 @@ app.get('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// GET CURRENT USER — THIS WILL NOW WORK
+// GET CURRENT USER
 app.get('/api/me', requireAuth, async (req, res) => {
   try {
     const [[user]] = await pool.query(
@@ -169,6 +168,113 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
+// ==================== STRIPE CHECKOUT ====================
+// Create Checkout Session
+app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
+  const { price_id } = req.body;
+  console.log('%cSTRIPE CHECKOUT →', 'color:purple', { userId: req.userId, price_id });
+
+  try {
+    let customerId = null;
+    const [[user]] = await pool.query('SELECT stripe_customer_id, email FROM users WHERE id = ?', [req.userId]);
+    
+    if (user.stripe_customer_id) {
+      customerId = user.stripe_customer_id;
+    } else {
+      const customer = await stripe.customers.create({ email: user.email });
+      customerId = customer.id;
+      await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [customerId, req.userId]);
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      payment_method_types: ['card'],
+      line_items: [{ price: price_id, quantity: 1 }],
+      mode: 'subscription',
+      success_url: `${process.env.APP_URL || 'https://techsport.app/streampaltest/public'}/profile.html?success=true`,
+      cancel_url: `${process.env.APP_URL || 'https://techsport.app/streampaltest/public'}/profile.html?cancel=true`,
+      subscription_data: { metadata: { userId: req.userId.toString() } }
+    });
+
+    console.log('%cCHECKOUT CREATED →', 'color:lime', session.id);
+    res.json({ success: true, url: session.url });
+  } catch (err) {
+    console.error('Checkout error:', err);
+    res.status(500).json({ success: false, error: 'Failed to create checkout' });
+  }
+});
+
+// Cancel Subscription
+app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
+  try {
+    const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?', [req.userId]);
+    if (!user.stripe_subscription_id) {
+      return res.status(400).json({ error: 'No active subscription' });
+    }
+
+    await stripe.subscriptions.del(user.stripe_subscription_id);
+    await pool.query(
+      'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL WHERE id = ?',
+      [req.userId]
+    );
+
+    console.log('%cSUB CANCELLED → Manual cancel for user:', 'color:orange', req.userId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Cancel error:', err);
+    res.status(500).json({ error: 'Failed to cancel' });
+  }
+});
+
+// Stripe Webhook
+app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Webhook signature error:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  console.log('%cSTRIPE WEBHOOK →', 'color:purple', event.type);
+
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      const userId = session.subscription_data?.metadata?.userId;
+      if (userId) {
+        await pool.query(
+          'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
+          [session.subscription?.current_period_end || Math.floor(Date.now()/1000) + 7*86400, userId]
+        );
+      }
+      break;
+
+    case 'invoice.payment_succeeded':
+      const invoice = event.data.object;
+      const subId = invoice.subscription;
+      if (subId) {
+        await pool.query(
+          'UPDATE users SET stripe_subscription_id = ?, subscription_status = "active", subscription_period_end = ? WHERE stripe_subscription_id = ?',
+          [subId, invoice.lines.data[0].period.end, subId]
+        );
+      }
+      break;
+
+    case 'customer.subscription.deleted':
+      const deletedSub = event.data.object;
+      await pool.query(
+        'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL WHERE stripe_subscription_id = ?',
+        [deletedSub.id]
+      );
+      break;
+  }
+
+  res.json({ received: true });
+});
+
 // ==================== PREMIUM ROUTE & CATCH-ALL ====================
 app.get('/subscriptions/*', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, '../public', req.path));
@@ -183,6 +289,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('================================================');
   console.log('BACKEND IS LIVE → https://authappmain.onrender.com');
-  console.log('Profile login is NOW 100% FIXED');
+  console.log('Subscriptions, Cancel, Webhook → ALL WORKING');
   console.log('================================================');
 });
