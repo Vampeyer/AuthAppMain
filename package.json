@@ -1,9 +1,9 @@
 {
   "name": "authapp",
   "version": "1.0.0",
-  "main": "./server/server.js",
+  "main": "server/server.js",
   "scripts": {
-    "start": "node /server/server.js"
+    "start": "node server/server.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

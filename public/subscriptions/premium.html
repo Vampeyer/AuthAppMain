@@ -1,55 +1,21 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Premium Content</title>
-  <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body>
-  <nav>
-    <a href="/">Home</a>
-    <a href="/profile.html">Profile</a>
-    <a href="/subscriptions/premium.html">Premium Area</a>
-  </nav>
+<script>
+const BACKEND_URL = 'https://authappmain.onrender.com';
+console.log('Premium → Backend:', BACKEND_URL);
 
-  <div class="container" id="premium-content" style="display:none;">
-    <!-- PUT YOUR REAL PREMIUM CONTENT HERE -->
-    <h1>🎉 WELCOME TO PREMIUM!</h1>
-    <p>This is your exclusive content.</p>
-    <p>You can add videos, downloads, secret links, etc.</p>
-    <p>Only paying members see this!</p>
-    <!-- END OF PREMIUM CONTENT -->
-  </div>
+fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' })
+  .then(r => r.ok ? r.json() : Promise.reject())
+  .then(u => {
+    if (u.subscription_active) {
+      document.getElementById('premium').style.display = 'block';
+    } else {
+      alert('Subscription required');
+      location.href = '/profile.html';
+    }
+  })
+  .catch(() => location.href = '/login.html');
+</script>
 
-  <script>
-    // This runs immediately when the page loads
-    console.log('Premium page loaded — checking subscription...');
-
-    fetch('/api/me', { 
-      method: 'GET',
-      credentials: 'include' 
-    })
-    .then(response => {
-      if (!response.ok) throw new Error('Not logged in');
-      return response.json();
-    })
-    .then(user => {
-      console.log('User data:', user);
-      if (user.subscription_active) {
-        console.log('Subscription active — showing premium content');
-        document.getElementById('premium-content').style.display = 'block';
-      } else {
-        console.log('No active subscription — blocking access');
-        alert('You must have an active subscription to view this page.');
-        window.location.href = '/profile.html';
-      }
-    })
-    .catch(err => {
-      console.log('Access denied:', err.message);
-      alert('You must have an active subscription to view this page.');
-      window.location.href = '/profile.html';
-    });
-  </script>
-</body>
-</html>
+<div id="premium" style="display:none">
+  <h1>PREMIUM CONTENT UNLOCKED</h1>
+  <p>You have access!</p>
+</div>
