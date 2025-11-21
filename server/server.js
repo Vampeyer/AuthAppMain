@@ -146,7 +146,8 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
       mode: 'subscription',
-      success_url: 'https://techsport.app/streampaltest/public/profile.html?success=true',
+
+      success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
     });
 
@@ -201,6 +202,37 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
 
   res.json({ received: true });
 });
+
+
+
+
+// Recover session after Stripe redirect
+app.get('/api/recover-session', async (req, res) => {
+  const { session_id } = req.query;
+  if (!session_id) return res.status(400).json({ error: 'No session' });
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    const userId = session.subscription_data?.metadata?.userId || session.metadata?.userId;
+    if (!userId) return res.status(400).json({ error: 'No user' });
+
+    // Re-issue cookie
+    res.cookie('jwt', generateToken(userId), {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Invalid session' });
+  }
+});
+
+
+
+
 
 // STATIC FILES
 app.get('*', (req, res) => {
