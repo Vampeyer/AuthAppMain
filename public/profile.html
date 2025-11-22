@@ -60,7 +60,7 @@ async function loadProfile() {
 
       <p><button onclick="logout()" style="margin-top:20px;padding:10px 20px;">Logout</button></p>
     `;
-
+console.log(sessionId)
     if (sessionId) {
       document.getElementById('content').insertAdjacentHTML('afterbegin',
         '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;">Thank you! Subscription active!</div>'
