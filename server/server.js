@@ -127,28 +127,28 @@ app.get('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// PROFILE + AUTO-EXPIRE
+// PROFILE + AUTO-EXPIRE OLD SUBSCRIPTIONS
 app.get('/api/me', requireAuth, async (req, res) => {
-  console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
-
   try {
     const [[user]] = await pool.query(
-      'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
+      'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id FROM users WHERE id = ?',
       [req.userId]
     );
 
     const now = Math.floor(Date.now() / 1000);
     let active = user.subscription_status === 'active' && user.subscription_period_end > now;
 
+    // Auto-expire if past due
     if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
-      await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
+      await pool.query(
+        'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
+        [req.userId]
+      );
       active = false;
-      console.log('%cSUB AUTO-EXPIRED → User ID:', 'color:orange', req.userId);
+      console.log('%cSUBSCRIPTION AUTO-EXPIRED →', 'color:orange', req.userId);
     }
 
     const daysLeft = active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0;
-
-    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft });
 
     res.json({
       username: user.username,
@@ -178,6 +178,9 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       console.log('%cNEW STRIPE CUSTOMER CREATED → ID:', 'color:cyan', customerId);
     }
 
+
+
+    
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
@@ -196,41 +199,41 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION
+// RECOVER LOGIN + ACTIVATE SUBSCRIPTION AFTER STRIPE PAYMENT — FINAL FIX
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
-  console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
-
-  if (!session_id) {
-    console.log('%cRECOVER FAILED → No session_id', 'color:red');
-    return res.status(400).json({ error: 'No session_id' });
-  }
+  if (!session_id) return res.status(400).json({ error: 'No session_id' });
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
+    const session = await stripe.checkout.sessions.retrieve(session_id, {
+      expand: ['subscription']
+    });
+
     const userId = session.metadata?.userId;
+    if (!userId) return res.status(400).json({ error: 'No user in session' });
 
-    if (!userId) {
-      console.log('%cRECOVER FAILED → No userId in metadata', 'color:red');
-      return res.status(400).json({ error: 'No user in session' });
-    }
+    const subscription = session.subscription;
+    if (!subscription) return res.status(400).json({ error: 'No subscription' });
 
-    const sub = session.subscription;
-    if (!sub) {
-      console.log('%cRECOVER FAILED → No subscription in session', 'color:red');
-      return res.status(400).json({ error: 'No sub' });
-    }
+    // Get real end date from Stripe
+    const periodEnd = subscription.current_period_end;
 
-    const periodEnd = sub.current_period_end;
-    const stripeSubId = sub.id;
+    // Save subscription ID for future cancels
+    const stripeSubId = subscription.id;
 
+    // UPDATE DB: Mark as active + save real end time + subscription ID
     await pool.query(
-      'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
+      `UPDATE users 
+       SET subscription_status = 'active',
+           subscription_period_end = ?,
+           stripe_subscription_id = ?
+       WHERE id = ?`,
       [periodEnd, stripeSubId, userId]
     );
 
-    console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End:', new Date(periodEnd * 1000));
+    console.log('%cSUBSCRIPTION ACTIVATED via recover-session →', 'color:lime', { userId, periodEnd: new Date(periodEnd * 1000) });
 
+    // Re-issue JWT cookie
     res.cookie('jwt', generateToken(userId), {
       httpOnly: true,
       secure: true,
@@ -239,13 +242,16 @@ app.get('/api/recover-session', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    console.log('%cRECOVER SUCCESS → Cookie re-issued for User ID:', 'color:lime', userId);
     res.json({ success: true });
   } catch (err) {
-    console.error('Recover error:', err);
-    res.status(500).json({ error: 'Failed' });
+    console.error('Recover session error:', err);
+    res.status(500).json({ error: 'Failed to activate subscription' });
   }
 });
+
+
+
+
 
 // CANCEL SUBSCRIPTION
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
