@@ -185,7 +185,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       mode: 'subscription',
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
-      metadata: { userId: req.userId.toString(), priceId }  // Added priceId to metadata for fallback
+      metadata: { userId: req.userId.toString(), price_id }  // Fixed: use price_id
     });
 
     console.log('%cCHECKOUT SESSION CREATED → ID:', 'color:lime', session.id);
@@ -229,18 +229,18 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-      // Fallback to hardcoded based on priceId
-      const priceId = session.metadata?.priceId;
+      // Fallback to hardcoded based on price_id
+      const price_id = session.metadata?.price_id;
       const now = Math.floor(Date.now() / 1000);
-      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+      if (price_id === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
         periodEnd = now + 7 * 86400;
-      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+      } else if (price_id === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
         periodEnd = now + 30 * 86400;
       } else {
-        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
+        console.log('%cRECOVER FAILED → Unknown price_id for fallback', 'color:red', price_id);
         return res.status(400).json({ error: 'Unknown product' });
       }
-      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', price_id, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
     } else {
       console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
     }
