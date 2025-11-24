@@ -148,7 +148,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
 
     const daysLeft = active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0;
 
-    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft });
+    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft, periodEnd: user.subscription_period_end });
 
     res.json({
       username: user.username,
@@ -196,7 +196,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION
+// RECOVER + ACTIVATE SUBSCRIPTION — FIXED PERIOD END
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
@@ -208,8 +208,9 @@ app.get('/api/recover-session', async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
-    const userId = session.metadata?.userId;
+    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode);
 
+    const userId = session.metadata?.userId;
     if (!userId) {
       console.log('%cRECOVER FAILED → No userId in metadata', 'color:red');
       return res.status(400).json({ error: 'No user in session' });
@@ -223,13 +224,19 @@ app.get('/api/recover-session', async (req, res) => {
 
     const periodEnd = sub.current_period_end;
     const stripeSubId = sub.id;
+    console.log('%cSUB DETAILS → ID:', 'color:cyan', stripeSubId, 'Period End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+
+    if (!periodEnd || periodEnd <= 0) {
+      console.log('%cRECOVER FAILED → Invalid periodEnd', 'color:red');
+      return res.status(400).json({ error: 'Invalid sub period' });
+    }
 
     await pool.query(
       'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
       [periodEnd, stripeSubId, userId]
     );
 
-    console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End:', new Date(periodEnd * 1000));
+    console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     res.cookie('jwt', generateToken(userId), {
       httpOnly: true,
