@@ -185,7 +185,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       mode: 'subscription',
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
-      metadata: { userId: req.userId.toString(), price_id }  // Fixed: use price_id
+      metadata: { userId: req.userId.toString(), priceId: price_id }  // Fixed capitalization to priceId
     });
 
     console.log('%cCHECKOUT SESSION CREATED → ID:', 'color:lime', session.id);
@@ -229,18 +229,18 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-      // Fallback to hardcoded based on price_id
-      const price_id = session.metadata?.price_id;
+      // Fallback to hardcoded based on priceId
+      const priceId = session.metadata?.priceId;
       const now = Math.floor(Date.now() / 1000);
-      if (price_id === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
         periodEnd = now + 7 * 86400;
-      } else if (price_id === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
         periodEnd = now + 30 * 86400;
       } else {
-        console.log('%cRECOVER FAILED → Unknown price_id for fallback', 'color:red', price_id);
+        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
         return res.status(400).json({ error: 'Unknown product' });
       }
-      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', price_id, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
     } else {
       console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
     }
@@ -271,7 +271,7 @@ app.get('/api/recover-session', async (req, res) => {
   }
 });
 
-// CANCEL SUBSCRIPTION
+// CANCEL SUBSCRIPTION — FIXED WITH CORRECT STRIPE METHOD
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   console.log('%cCANCEL REQUEST → User ID:', 'color:orange', req.userId);
 
@@ -282,7 +282,11 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
       return res.json({ error: 'No subscription' });
     }
 
-    await stripe.subscriptions.del(user.stripe_subscription_id);
+    // Correct method: stripe.subscriptions.cancel
+    await stripe.subscriptions.cancel(user.stripe_subscription_id, {
+      prorate: true  // Prorate if needed
+    });
+
     await pool.query(
       'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
       [req.userId]
