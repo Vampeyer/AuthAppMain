@@ -196,7 +196,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION — FIXED PERIOD END
+// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH SEPARATE FETCH IF NEEDED
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
@@ -208,7 +208,7 @@ app.get('/api/recover-session', async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
-    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode);
+    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode, 'Full Session:', JSON.stringify(session, null, 2));
 
     const userId = session.metadata?.userId;
     if (!userId) {
@@ -216,18 +216,31 @@ app.get('/api/recover-session', async (req, res) => {
       return res.status(400).json({ error: 'No user in session' });
     }
 
-    const sub = session.subscription;
+    let sub = session.subscription;
+    if (typeof sub === 'string') {
+      // If expand didn't work, fetch full sub
+      sub = await stripe.subscriptions.retrieve(sub);
+      console.log('%cFETCHED FULL SUB SEPARATELY → ID:', 'color:cyan', sub.id);
+    }
+
     if (!sub) {
-      console.log('%cRECOVER FAILED → No subscription in session', 'color:red');
+      console.log('%cRECOVER FAILED → No subscription', 'color:red');
       return res.status(400).json({ error: 'No sub' });
     }
 
-    const periodEnd = sub.current_period_end;
+    let periodEnd = sub.current_period_end;
+    if (!periodEnd || periodEnd <= 0) {
+      // Fallback fetch if still undefined
+      sub = await stripe.subscriptions.retrieve(sub.id);
+      periodEnd = sub.current_period_end;
+      console.log('%cFALLBACK FETCH FOR PERIOD END →', 'color:cyan', periodEnd);
+    }
+
     const stripeSubId = sub.id;
     console.log('%cSUB DETAILS → ID:', 'color:cyan', stripeSubId, 'Period End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     if (!periodEnd || periodEnd <= 0) {
-      console.log('%cRECOVER FAILED → Invalid periodEnd', 'color:red');
+      console.log('%cRECOVER FAILED → Invalid periodEnd after fallback', 'color:red');
       return res.status(400).json({ error: 'Invalid sub period' });
     }
 
