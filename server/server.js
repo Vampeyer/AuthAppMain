@@ -143,12 +143,12 @@ app.get('/api/me', requireAuth, async (req, res) => {
     if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
       await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
-      console.log('%cSUB AUTO-EXPIRED → User ID:', 'color:orange', req.userId);
+      console.log('%cSUB AUTO-EXPIRED → User ID:', 'color:orange', req.userId, 'Old End:', user.subscription_period_end, 'Now:', now);
     }
 
     const daysLeft = active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0;
 
-    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft, periodEnd: user.subscription_period_end });
+    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft, periodEnd: user.subscription_period_end, endDate: new Date(user.subscription_period_end * 1000) });
 
     res.json({
       username: user.username,
@@ -185,7 +185,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       mode: 'subscription',
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
-      metadata: { userId: req.userId.toString() }
+      metadata: { userId: req.userId.toString(), priceId }  // Added priceId to metadata for fallback
     });
 
     console.log('%cCHECKOUT SESSION CREATED → ID:', 'color:lime', session.id);
@@ -196,7 +196,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH SEPARATE FETCH IF NEEDED
+// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
@@ -208,7 +208,7 @@ app.get('/api/recover-session', async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
-    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode, 'Full Session:', JSON.stringify(session, null, 2));
+    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode, 'Metadata:', session.metadata);
 
     const userId = session.metadata?.userId;
     if (!userId) {
@@ -218,7 +218,6 @@ app.get('/api/recover-session', async (req, res) => {
 
     let sub = session.subscription;
     if (typeof sub === 'string') {
-      // If expand didn't work, fetch full sub
       sub = await stripe.subscriptions.retrieve(sub);
       console.log('%cFETCHED FULL SUB SEPARATELY → ID:', 'color:cyan', sub.id);
     }
@@ -230,19 +229,24 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-      // Fallback fetch if still undefined
-      sub = await stripe.subscriptions.retrieve(sub.id);
-      periodEnd = sub.current_period_end;
-      console.log('%cFALLBACK FETCH FOR PERIOD END →', 'color:cyan', periodEnd);
+      // Fallback to hardcoded based on priceId
+      const priceId = session.metadata?.priceId;
+      const now = Math.floor(Date.now() / 1000);
+      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+        periodEnd = now + 7 * 86400;
+      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+        periodEnd = now + 30 * 86400;
+      } else {
+        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
+        return res.status(400).json({ error: 'Unknown product' });
+      }
+      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+    } else {
+      console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
     }
 
     const stripeSubId = sub.id;
     console.log('%cSUB DETAILS → ID:', 'color:cyan', stripeSubId, 'Period End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
-
-    if (!periodEnd || periodEnd <= 0) {
-      console.log('%cRECOVER FAILED → Invalid periodEnd after fallback', 'color:red');
-      return res.status(400).json({ error: 'Invalid sub period' });
-    }
 
     await pool.query(
       'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',

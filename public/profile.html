@@ -32,6 +32,7 @@ async function loadProfile() {
     try {
       const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`, { credentials: 'include' });
       console.log('Recover response status:', recoverRes.status);
+      if (!recoverRes.ok) console.log('Recover failed with status:', recoverRes.status);
       history.replaceState(null, '', 'profile.html');
     } catch (e) {
       console.error('Recover session failed:', e);
@@ -44,7 +45,7 @@ async function loadProfile() {
     console.log('/api/me status:', res.status);
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
-    console.log('User data:', u);
+    console.log('User data received:', u);
 
     document.getElementById('content').innerHTML = `
       <h3>Welcome, <strong>${u.username}</strong>!</h3>
@@ -69,11 +70,13 @@ async function loadProfile() {
       <p><button onclick="logout()" style="margin-top:20px;padding:10px 20px;background:#555;color:white;border:none;border-radius:4px;">Logout</button></p>
     `;
 
+    console.log('Rendered subscription status:', u.subscription_active ? 'ACTIVE' : 'INACTIVE', 'with days left:', u.days_left);
+
     if (sessionId) {
       document.getElementById('content').insertAdjacentHTML('afterbegin',
         '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;font-weight:bold;">Thank you! Your subscription is now ACTIVE!</div>'
       );
-      console.log('Success message shown');
+      console.log('Success message shown after redirect');
     }
 
   } catch (err) {
