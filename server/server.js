@@ -236,8 +236,6 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-
-      
       // Fallback to hardcoded based on priceId
       const priceId = session.metadata?.priceId;
       const now = Math.floor(Date.now() / 1000);
@@ -245,8 +243,8 @@ app.get('/api/recover-session', async (req, res) => {
         periodEnd = now + 7 * 86400;
       } else if (priceId === `${prices.price3_30daysub}`) { // Monthly
         periodEnd = now + 30 * 86400;
-           } else if (priceId === `${prices.price1fullaccess}`) { // Monthly
-        periodEnd = now + 30 * 8640000;
+           } else if (priceId === `${prices.price1fullaccess}`) { // yearly
+        periodEnd = now + 365 * 86400;
 
 
 
