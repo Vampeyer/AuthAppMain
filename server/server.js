@@ -16,6 +16,13 @@ const pool = require('./db');
 
 const app = express();
 
+const prices = {
+  price1fullaccess : "price_1SXOVuFF2HALdyFk95SThAcM", 
+  price2_7daysub : "price_1SIBPkFF2HALdyFkogiGJG5w" , 
+  price3_30daysub : "price_1SIBCzFF2HALdyFk7vOxByGq"
+}
+
+
 // ==================== CORS ====================
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -229,17 +236,26 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
+
+      
       // Fallback to hardcoded based on priceId
       const priceId = session.metadata?.priceId;
       const now = Math.floor(Date.now() / 1000);
-      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+      if (priceId === `${prices.price2_7daysub}`) { // Weekly
         periodEnd = now + 7 * 86400;
-      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+      } else if (priceId === `${prices.price3_30daysub}`) { // Monthly
         periodEnd = now + 30 * 86400;
+           } else if (priceId === `${prices.price1fullaccess}`) { // Monthly
+        periodEnd = now + 30 * 8640000;
+
+
+
       } else {
         console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
         return res.status(400).json({ error: 'Unknown product' });
       }
+
+
       console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
     } else {
       console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
