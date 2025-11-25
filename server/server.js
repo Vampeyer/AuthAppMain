@@ -241,10 +241,10 @@ app.get('/api/recover-session', async (req, res) => {
       const now = Math.floor(Date.now() / 1000);
       if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
         periodEnd = now + 7 * 86400;
-      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+      }  if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
         periodEnd = now + 30 * 86400;
-           } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
-        periodEnd = now + 30 * 86400;
+           }  if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Monthly
+        periodEnd = now + 365 * 86400;
 
 
 
@@ -274,7 +274,7 @@ app.get('/api/recover-session', async (req, res) => {
       secure: true,
       sameSite: 'none',
       path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge:  7 * 24 * 60 * 60 * 100000
     });
 
     console.log('%cRECOVER SUCCESS → Cookie re-issued for User ID:', 'color:lime', userId);
