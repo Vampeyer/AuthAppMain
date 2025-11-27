@@ -271,7 +271,7 @@ app.get('/api/recover-session', async (req, res) => {
   }
 });
 
-// CANCEL SUBSCRIPTION — FIXED WITH CORRECT STRIPE METHOD
+// CANCEL SUBSCRIPTION — FIXED METHOD
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   console.log('%cCANCEL REQUEST → User ID:', 'color:orange', req.userId);
 
@@ -279,14 +279,10 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
     const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?', [req.userId]);
     if (!user.stripe_subscription_id) {
       console.log('%cCANCEL FAILED → No subscription', 'color:red');
-      return res.json({ error: 'No subscription' });
+      return res.status(400).json({ error: 'No subscription' });
     }
 
-    // Correct method: stripe.subscriptions.cancel
-    await stripe.subscriptions.cancel(user.stripe_subscription_id, {
-      prorate: true  // Prorate if needed
-    });
-
+    await stripe.subscriptions.cancel(user.stripe_subscription_id);
     await pool.query(
       'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
       [req.userId]
