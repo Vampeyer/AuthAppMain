@@ -16,13 +16,6 @@ const pool = require('./db');
 
 const app = express();
 
-const prices = {
-  price1fullaccess : "price_1SXOVuFF2HALdyFk95SThAcM", 
-  price2_7daysub : "price_1SIBPkFF2HALdyFkogiGJG5w" , 
-  price3_30daysub : "price_1SIBCzFF2HALdyFk7vOxByGq"
-}
-
-
 // ==================== CORS ====================
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -189,26 +182,19 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'payment',  //  'subscription' for subscription payments and 'payment' for single checkout payments
+      mode: 'subscription',
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
       metadata: { userId: req.userId.toString(), priceId: price_id }  // Fixed capitalization to priceId
     });
 
     console.log('%cCHECKOUT SESSION CREATED → ID:', 'color:lime', session.id);
-
-    
     res.json({ url: session.url });
   } catch (err) {
     console.error('Checkout error:', err);
     res.status(500).json({ error: 'Checkout failed' });
   }
 });
-
-
-
-
-
 
 // RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK
 app.get('/api/recover-session', async (req, res) => {
@@ -248,19 +234,12 @@ app.get('/api/recover-session', async (req, res) => {
       const now = Math.floor(Date.now() / 1000);
       if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
         periodEnd = now + 7 * 86400;
-      }  if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
         periodEnd = now + 30 * 86400;
-           }  if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Monthly
-        periodEnd = now + 365 * 86400;
-
-
-
       } else {
         console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
         return res.status(400).json({ error: 'Unknown product' });
       }
-
-
       console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
     } else {
       console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
@@ -281,7 +260,7 @@ app.get('/api/recover-session', async (req, res) => {
       secure: true,
       sameSite: 'none',
       path: '/',
-      maxAge:  7 * 24 * 60 * 60 * 100000
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     console.log('%cRECOVER SUCCESS → Cookie re-issued for User ID:', 'color:lime', userId);
