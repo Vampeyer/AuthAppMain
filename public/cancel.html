@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cancel Subscription</title>
+  <!-- THIS FIXES ALL YOUR PROBLEMS -->
+  <base href="/streampaltest/public/">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/profile.html">Profile</a>
+    <a href="/subscriptions/premium.html">Premium Area</a>
+  </nav>
+  <div class="container" style="text-align:center">
+    <h1>Cancel Subscription</h1>
+    <p>Your access will remain active until the end of your current billing period.</p>
+    <button class="btn-danger" style="font-size:24px;padding:30px 60px;margin:40px" onclick="confirmCancel()">
+      CANCEL MY SUBSCRIPTION
+    </button>
+    <p><a href="/profile.html">← Back to Profile</a></p>
+  </div>
+
+  <script>
+    async function confirmCancel() {
+      if (!confirm("Are you sure you want to cancel your subscription?\n\nYou will lose access at the end of your billing period.")) {
+        return;
+      }
+
+      const res = await fetch('/api/cancel-subscription', {
+        method: 'POST',
+        credentials: 'include'
+      }).then(r => r.json());
+
+      if (res.success) {
+        alert("Subscription cancelled. You will keep access until the end of your period.");
+        location.href = '/profile.html';
+      } else {
+        alert("Error: " + (res.error || "Unknown"));
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+
+
+___________________________________________________________________________
+Checklist for changing or editing a price / product , 
+for access / subscription , as a one off payment. 
+
+Payments can be a single payment , that then gives access too the premium content. 
+
+Payments can be given , to allow hardcoded - 
+ different time lengths of access , based on different prices here , 
+ such as 7 days , 30 days , or unlimuted (infinity) time lengths. 
+
+ 
