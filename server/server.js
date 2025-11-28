@@ -64,7 +64,7 @@ const requireAuth = (req, res, next) => {
 
 // ==================== ROUTES ====================
 
-// SIGNUP
+// SIGNUP — FIXED WITH DETAILED ERROR LOGGING
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
   console.log('%cSIGNUP ATTEMPT →', 'color:orange', { username, email });
@@ -84,7 +84,7 @@ app.post('/api/signup', async (req, res) => {
     console.log('%cNEW USER CREATED → ID:', 'color:lime', result.insertId);
     res.json({ success: true, phrase });
   } catch (err) {
-    console.error('Signup error:', err);
+    console.error('%cSignup error → Full Details:', 'color:red', { message: err.message, code: err.code, stack: err.stack });
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
