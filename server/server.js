@@ -182,7 +182,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'subscription',
+      mode: 'subscription', // Subscription for subscription ,/ "payment" for single purchasse items
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
       metadata: { userId: req.userId.toString(), priceId: price_id }  // Fixed capitalization to priceId
@@ -229,6 +229,8 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
+
+      try {
       // Fallback to hardcoded based on priceId
       const priceId = session.metadata?.priceId;
       const now = Math.floor(Date.now() / 1000);
@@ -236,10 +238,15 @@ app.get('/api/recover-session', async (req, res) => {
         periodEnd = now + 7 * 86400;
       } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
         periodEnd = now + 30 * 86400;
+      } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Monthly
+        periodEnd = now + 365 * 86400;
+
+
+
       } else {
         console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
         return res.status(400).json({ error: 'Unknown product' });
-      }
+      }} catch {console.error("Fix correct price id")}
       console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
     } else {
       console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
@@ -280,7 +287,7 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
     if (!user.stripe_subscription_id) {
       console.log('%cCANCEL FAILED → No subscription', 'color:red');
       return res.status(400).json({ error: 'No subscription' });
-    }
+    } else { console.log("Cancelled Subscription") }
 
     await stripe.subscriptions.cancel(user.stripe_subscription_id);
     await pool.query(
