@@ -287,9 +287,9 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
     if (!user.stripe_subscription_id) {
       console.log('%cCANCEL FAILED → No subscription', 'color:red');
       return res.status(400).json({ error: 'No subscription' });
-    } else { console.log("Cancelled Subscription") }
+    }
 
-    await stripe.subscriptions.cancel(user.stripe_subscription_id);
+    await stripe.subscriptions.cancel(user.stripe_subscription_id);  // <-- Changed 'del' to 'cancel' (correct Stripe method)
     await pool.query(
       'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
       [req.userId]
