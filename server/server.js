@@ -305,6 +305,45 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
+
+
+
+// PROTECTED SUBSCRIPTIONS FOLDER — SERVER-SIDE RESTRICTION
+const requireSubscription = async (req, res, next) => {
+  try {
+    const [[user]] = await pool.query(
+      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
+      [req.userId]
+    );
+    const now = Math.floor(Date.now() / 1000);
+    const active = user.subscription_status === 'active' && user.subscription_period_end > now;
+    if (!active) {
+      console.log('%cSUB CHECK FAILED → User ID:', 'color:red', req.userId);
+      return res.status(403).json({ error: 'Subscription required' });  // Or redirect: res.redirect('/profile.html')
+    }
+    next();
+  } catch (err) {
+    console.error('Sub check error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Serve protected files from /subscriptions/ (move folder out of public)
+app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
+  const filePath = path.join(__dirname, '..', 'subscriptions', req.params[0]);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('File serve error:', err);
+      res.status(404).send('File not found');
+    }
+  });
+});
+
+
+
+
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('BACKEND IS LIVE — WITH DEBUG LOGS');
