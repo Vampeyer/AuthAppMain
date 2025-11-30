@@ -1,4 +1,4 @@
-// server.js — FINAL FIXED VERSION WITH EXTRA CONSOLE LOGS FOR DEBUGGING
+// server.js — FINAL WORKING VERSION (premium content fully protected)
 require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
@@ -45,6 +45,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 // ==================== JWT ====================
 const JWT_SECRET = process.env.JWT_SECRET;
 const generateToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expiresIn: '7d' });
+
 const verifyToken = (token) => {
   try { return jwt.verify(token, JWT_SECRET); }
   catch { return null; }
@@ -64,7 +65,7 @@ const requireAuth = (req, res, next) => {
 
 // ==================== ROUTES ====================
 
-// SIGNUP — FIXED WITH DETAILED ERROR LOGGING
+// SIGNUP
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
   console.log('%cSIGNUP ATTEMPT →', 'color:orange', { username, email });
@@ -84,7 +85,7 @@ app.post('/api/signup', async (req, res) => {
     console.log('%cNEW USER CREATED → ID:', 'color:lime', result.insertId);
     res.json({ success: true, phrase });
   } catch (err) {
-    console.error('%cSignup error → Full Details:', 'color:red', { message: err.message, code: err.code, stack: err.stack });
+    console.error('Signup error:', err);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
@@ -109,11 +110,10 @@ app.post('/api/login', async (req, res) => {
         path: '/',
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
-
-      console.log('%cLOGIN SUCCESS → Cookie sent', 'color:lime');
+      console.log('%cLOGIN SUCCESS', 'color:lime');
       return res.json({ success: true });
     } else {
-      console.log('%cLOGIN FAILED → Wrong credentials', 'color:red');
+      console.log('%cLOGIN FAILED', 'color:red');
       res.status(401).json({ success: false });
     }
   } catch (err) {
@@ -129,8 +129,6 @@ app.get('/api/logout', (req, res) => {
 
 // PROFILE + AUTO-EXPIRE
 app.get('/api/me', requireAuth, async (req, res) => {
-  console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
-
   try {
     const [[user]] = await pool.query(
       'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
@@ -143,12 +141,9 @@ app.get('/api/me', requireAuth, async (req, res) => {
     if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
       await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
-      console.log('%cSUB AUTO-EXPIRED → User ID:', 'color:orange', req.userId, 'Old End:', user.subscription_period_end, 'Now:', now);
     }
 
     const daysLeft = active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0;
-
-    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft, periodEnd: user.subscription_period_end, endDate: new Date(user.subscription_period_end * 1000) });
 
     res.json({
       username: user.username,
@@ -165,7 +160,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
 // CREATE CHECKOUT SESSION
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   const { price_id } = req.body;
-  console.log('%cCHECKOUT START → User ID:', 'color:purple', req.userId, 'Price ID:', price_id);
+  console.log('%cCHECKOUT START → User ID:', 'color:purple', req.userId, price_id);
 
   try {
     const [[user]] = await pool.query('SELECT stripe_customer_id, email FROM users WHERE id = ?', [req.userId]);
@@ -175,7 +170,6 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       const customer = await stripe.customers.create({ email: user.email });
       customerId = customer.id;
       await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [customerId, req.userId]);
-      console.log('%cNEW STRIPE CUSTOMER CREATED → ID:', 'color:cyan', customerId);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -185,10 +179,9 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       mode: 'subscription',
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
-      metadata: { userId: req.userId.toString(), priceId: price_id }  // Fixed capitalization to priceId
+      metadata: { userId: req.userId.toString(), priceId: price_id }
     });
 
-    console.log('%cCHECKOUT SESSION CREATED → ID:', 'color:lime', session.id);
     res.json({ url: session.url });
   } catch (err) {
     console.error('Checkout error:', err);
@@ -196,66 +189,33 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK
+// RECOVER SESSION AFTER PAYMENT
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
-  console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
-
-  if (!session_id) {
-    console.log('%cRECOVER FAILED → No session_id', 'color:red');
-    return res.status(400).json({ error: 'No session_id' });
-  }
+  if (!session_id) return res.status(400).json({ error: 'No session_id' });
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
-    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode, 'Metadata:', session.metadata);
 
     const userId = session.metadata?.userId;
-    if (!userId) {
-      console.log('%cRECOVER FAILED → No userId in metadata', 'color:red');
-      return res.status(400).json({ error: 'No user in session' });
-    }
+    if (!userId) return res.status(400).json({ error: 'No user' });
 
     let sub = session.subscription;
-    if (typeof sub === 'string') {
-      sub = await stripe.subscriptions.retrieve(sub);
-      console.log('%cFETCHED FULL SUB SEPARATELY → ID:', 'color:cyan', sub.id);
-    }
-
-    if (!sub) {
-      console.log('%cRECOVER FAILED → No subscription', 'color:red');
-      return res.status(400).json({ error: 'No sub' });
-    }
+    if (typeof sub === 'string') sub = await stripe.subscriptions.retrieve(sub);
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-      // Fallback to hardcoded based on priceId
       const priceId = session.metadata?.priceId;
       const now = Math.floor(Date.now() / 1000);
-      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
-        periodEnd = now + 7 * 86400;
-      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
-        periodEnd = now + 30 * 86400;
-      } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
-        periodEnd = now + 365 * 86400;
-      } else {
-        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
-        return res.status(400).json({ error: 'Unknown product' });
-      }
-      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
-    } else {
-      console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
+      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') periodEnd = now + 7 * 86400;
+      else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') periodEnd = now + 30 * 86400;
+      else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') periodEnd = now + 365 * 86400;
     }
-
-    const stripeSubId = sub.id;
-    console.log('%cSUB DETAILS → ID:', 'color:cyan', stripeSubId, 'Period End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     await pool.query(
       'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
-      [periodEnd, stripeSubId, userId]
+      [periodEnd, sub.id, userId]
     );
-
-    console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     res.cookie('jwt', generateToken(userId), {
       httpOnly: true,
@@ -264,8 +224,6 @@ app.get('/api/recover-session', async (req, res) => {
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
-
-    console.log('%cRECOVER SUCCESS → Cookie re-issued for User ID:', 'color:lime', userId);
     res.json({ success: true });
   } catch (err) {
     console.error('Recover error:', err);
@@ -273,24 +231,15 @@ app.get('/api/recover-session', async (req, res) => {
   }
 });
 
-// CANCEL SUBSCRIPTION — FIXED METHOD
+// CANCEL SUBSCRIPTION
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
-  console.log('%cCANCEL REQUEST → User ID:', 'color:orange', req.userId);
-
   try {
     const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?', [req.userId]);
-    if (!user.stripe_subscription_id) {
-      console.log('%cCANCEL FAILED → No subscription', 'color:red');
-      return res.status(400).json({ error: 'No subscription' });
-    }
+    if (!user.stripe_subscription_id) return res.status(400).json({ error: 'No subscription' });
 
     await stripe.subscriptions.cancel(user.stripe_subscription_id);
-    await pool.query(
-      'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
-      [req.userId]
-    );
+    await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
 
-    console.log('%cCANCEL SUCCESS → User ID:', 'color:lime', req.userId);
     res.json({ success: true });
   } catch (err) {
     console.error('Cancel error:', err);
@@ -298,11 +247,8 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   }
 });
 
-
-
-
 // ——————————————————————
-// PROTECTED CONTENT — ONLY FOR LOGGED-IN + ACTIVE SUBSCRIPTION
+// 100% PROTECTED PREMIUM CONTENT
 // ——————————————————————
 const requireSubscription = async (req, res, next) => {
   try {
@@ -311,18 +257,16 @@ const requireSubscription = async (req, res, next) => {
       [req.userId]
     );
 
-    if (!user) {
-      return res.status(401).send('Unauthorized');
-    }
-
     const now = Math.floor(Date.now() / 1000);
-    const isActive = user.subscription_status === 'active' && user.subscription_period_end > now;
+    const active = user && user.subscription_status === 'active' && user.subscription_period_end > now;
 
-    if (!isActive) {
+    if (!active) {
       return res.status(403).send(`
-        <h1>Subscription Required</h1>
-        <p>You must be logged in with an active subscription to view this content.</p>
-        <a href="https://techsport.app/streampaltest/public/profile.html">Go to Profile → Subscribe</a>
+        <div style="padding:60px;text-align:center;font-family:sans-serif;background:#f8f8f8;height:100vh;">
+          <h1>Subscription Required</h1>
+          <p>You need an active subscription to view premium content.</p>
+          <a href="https://techsport.app/streampaltest/public/profile.html" style="color:#0066cc;font-size:18px;">Go to Profile & Subscribe</a>
+        </div>
       `);
     }
     next();
@@ -332,22 +276,26 @@ const requireSubscription = async (req, res, next) => {
   }
 };
 
-// This route protects everything under /subscriptions/
-app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
-  // req.params[0] contains the part after /subscriptions/
-  // e.g. premiumnu.html or folder/file.html
-  const filePath = path.join(__dirname, '../protected/subscriptions', req.params[0]);
+// Single protected route for all premium files
+app.get('/premium/:filename', requireAuth, requireSubscription, (req, res) => {
+  const filename = req.params.filename;
+
+  // Security: only allow safe filenames
+  if (!/^[a-zA-Z0-9._-]+(\.html|\.pdf|\.jpg|\.jpeg|\.png|\.mp4|\.webm)$/i.test(filename)) {
+    return res.status(400).send('Invalid filename');
+  }
+
+  const filePath = path.join(__dirname, 'premium-content', filename);
 
   res.sendFile(filePath, (err) => {
     if (err) {
-      console.log('File not found:', filePath);
+      console.log('Premium file not found:', filePath);
       res.status(404).send('File not found');
     }
   });
 });
 
-
-// STATIC FILES
+// Catch-all for public pages
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
