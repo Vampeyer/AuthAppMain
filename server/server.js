@@ -298,6 +298,55 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   }
 });
 
+
+
+
+// ——————————————————————
+// PROTECTED CONTENT — ONLY FOR LOGGED-IN + ACTIVE SUBSCRIPTION
+// ——————————————————————
+const requireSubscription = async (req, res, next) => {
+  try {
+    const [[user]] = await pool.query(
+      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
+      [req.userId]
+    );
+
+    if (!user) {
+      return res.status(401).send('Unauthorized');
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const isActive = user.subscription_status === 'active' && user.subscription_period_end > now;
+
+    if (!isActive) {
+      return res.status(403).send(`
+        <h1>Subscription Required</h1>
+        <p>You must be logged in with an active subscription to view this content.</p>
+        <a href="https://techsport.app/streampaltest/public/profile.html">Go to Profile → Subscribe</a>
+      `);
+    }
+    next();
+  } catch (err) {
+    console.error('requireSubscription error:', err);
+    res.status(500).send('Server error');
+  }
+};
+
+// This route protects everything under /subscriptions/
+app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
+  // req.params[0] contains the part after /subscriptions/
+  // e.g. premiumnu.html or folder/file.html
+  const filePath = path.join(__dirname, '../protected/subscriptions', req.params[0]);
+
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.log('File not found:', filePath);
+      res.status(404).send('File not found');
+    }
+  });
+});
+
+
 // STATIC FILES
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
