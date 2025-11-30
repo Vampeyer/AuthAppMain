@@ -320,7 +320,7 @@ const requireSubscription = async (req, res, next) => {
     const active = user.subscription_status === 'active' && user.subscription_period_end > now;
     if (!active) {
       console.log('%cSUB CHECK FAILED → User ID:', 'color:red', req.userId);
-      return res.status(403).send('<h1>Subscription Required</h1><p>Please subscribe to access this content. <a href="/profile.html">Go to Profile</a></p>');  // Custom error page
+      return res.status(403).send('<h1>Subscription Required</h1><p>Please subscribe to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Go to Profile</a></p>');  // Custom error, links back to frontend
     }
     next();
   } catch (err) {
@@ -328,6 +328,20 @@ const requireSubscription = async (req, res, next) => {
     res.status(500).send('Server error');
   }
 };
+
+// Serve protected files from /protected/subscriptions/
+app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
+  const filePath = path.join(__dirname, '../protected/subscriptions', req.params[0]);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('File serve error:', err);
+      res.status(404).send('File not found');
+    }
+  });
+});
+
+
+
 
 // Serve protected files from /protected/subscriptions/
 app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
