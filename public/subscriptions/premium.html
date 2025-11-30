@@ -17,7 +17,7 @@
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-
+try {
 fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' })
   .then(r => r.ok ? r.json() : Promise.reject('Not logged in or unauthorized'))
   .then(u => {
@@ -32,6 +32,8 @@ fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' })
     alert('This is premium content—login and subscribe to access!');
     location.href = 'login.html';  // Optional: redirect after alert
   });
+}
+catch { alert('Connection did not retrieve results') }
 </script>
 </body>
 </html>
