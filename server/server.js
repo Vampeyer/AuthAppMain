@@ -182,7 +182,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'subscription', // Subscription for subscription ,/ "payment" for single purchasse items
+      mode: 'subscription',
       success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
       metadata: { userId: req.userId.toString(), priceId: price_id }  // Fixed capitalization to priceId
@@ -229,24 +229,22 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-
-if (!periodEnd || periodEnd <= 0) {
-  // Fallback to hardcoded based on priceId
-  const priceId = session.metadata?.priceId;
-  const now = Math.floor(Date.now() / 1000);
-  if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
-    periodEnd = now + 7 * 86400;
-  } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
-    periodEnd = now + 30 * 86400;
-  } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
-    periodEnd = now + 365 * 86400;
-  } else {
-    console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
-    return res.status(400).json({ error: 'Unknown product' });
-  }
-  console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
-} 
-    
+      // Fallback to hardcoded based on priceId
+      const priceId = session.metadata?.priceId;
+      const now = Math.floor(Date.now() / 1000);
+      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+        periodEnd = now + 7 * 86400;
+      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+        periodEnd = now + 30 * 86400;
+      } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
+        periodEnd = now + 365 * 86400;
+      } else {
+        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
+        return res.status(400).json({ error: 'Unknown product' });
+      }
+      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+    } else {
+      console.log('%cSTRIPE PERIOD END USED →', 'color:cyan', periodEnd);
     }
 
     const stripeSubId = sub.id;
@@ -286,7 +284,7 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No subscription' });
     }
 
-    await stripe.subscriptions.cancel(user.stripe_subscription_id);  // <-- Changed 'del' to 'cancel' (correct Stripe method)
+    await stripe.subscriptions.cancel(user.stripe_subscription_id);
     await pool.query(
       'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
       [req.userId]
@@ -304,59 +302,6 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
-
-
-
-
-// PROTECTED SUBSCRIPTIONS FOLDER — SERVER-SIDE RESTRICTION
-// PROTECTED SUBSCRIPTIONS FOLDER — SERVER-SIDE RESTRICTION
-const requireSubscription = async (req, res, next) => {
-  try {
-    const [[user]] = await pool.query(
-      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
-      [req.userId]
-    );
-    const now = Math.floor(Date.now() / 1000);
-    const active = user.subscription_status === 'active' && user.subscription_period_end > now;
-    if (!active) {
-      console.log('%cSUB CHECK FAILED → User ID:', 'color:red', req.userId);
-      return res.status(403).send('<h1>Subscription Required</h1><p>Please subscribe to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Go to Profile</a></p>');  // Custom error, links back to frontend
-    }
-    next();
-  } catch (err) {
-    console.error('Sub check error:', err);
-    res.status(500).send('Server error');
-  }
-};
-
-// Serve protected files from /protected/subscriptions/
-app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
-  const filePath = path.join(__dirname, '../protected/subscriptions', req.params[0]);
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('File serve error:', err);
-      res.status(404).send('File not found');
-    }
-  });
-});
-
-
-
-
-// Serve protected files from /protected/subscriptions/
-app.get('/subscriptions/*', requireAuth, requireSubscription, (req, res) => {
-  const filePath = path.join(__dirname, '../protected/subscriptions', req.params[0]);
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('File serve error:', err);
-      res.status(404).send('File not found');
-    }
-  });
-});
-
-
-
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
