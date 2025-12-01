@@ -17,23 +17,18 @@
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-try {
+
 fetch(`${BACKEND_URL}/api/me`, { credentials: 'include' })
-  .then(r => r.ok ? r.json() : Promise.reject('Not logged in or unauthorized'))
+  .then(r => r.ok ? r.json() : Promise.reject())
   .then(u => {
     if (u.subscription_active) {
       document.getElementById('premium').style.display = 'block';
     } else {
-      alert('This is premium content—subscribe to access!');
-      location.href = 'profile.html';  // Optional: redirect after alert
+      alert('Subscription required');
+      location.href = 'profile.html';
     }
   })
-  .catch(err => {
-    alert('This is premium content—login and subscribe to access!');
-    location.href = 'login.html';  // Optional: redirect after alert
-  });
-}
-catch { alert('Connection did not retrieve results') }
+  .catch(() => location.href = 'login.html');
 </script>
 </body>
 </html>

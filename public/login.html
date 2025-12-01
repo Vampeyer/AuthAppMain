@@ -20,6 +20,7 @@
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
+console.log('LOGIN → Backend:', BACKEND_URL);
 
 async function login() {
   const data = {
@@ -31,14 +32,15 @@ async function login() {
   try {
     const res = await fetch(`${BACKEND_URL}/api/login`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
 
     const json = await res.json();
+    console.log('Response:', json);
 
-    if (json.success && json.token) {
-      localStorage.setItem('jwt', json.token);
+    if (json.success) {
       location.href = 'profile.html';
     } else {
       alert('Wrong username, password, or phrase');

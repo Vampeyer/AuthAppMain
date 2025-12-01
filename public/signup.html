@@ -29,27 +29,21 @@ async function signup() {
     password: document.getElementById('password').value
   };
 
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+  const res = await fetch(`${BACKEND_URL}/api/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }).then(r => r.json());
 
-    const json = await res.json();
-
-    if (json.success) {
-      document.getElementById('result').innerHTML = `
-        <p style="color:green">Account created!</p>
-        <p><strong>Recovery phrase:</strong><br>
-        <code style="background:#f0f0f0;padding:10px;display:block">${json.phrase}</code></p>
-        <p><a href="login.html">→ Go to Login</a></p>
-      `;
-    } else {
-      alert(json.error || 'Error');
-    }
-  } catch (e) {
-    alert('Server error');
+  if (res.success) {
+    document.getElementById('result').innerHTML = `
+      <p style="color:green">Account created!</p>
+      <p><strong>Recovery phrase:</strong><br>
+      <code style="background:#f0f0f0;padding:10px;display:block">${res.phrase}</code></p>
+      <p><a href="login.html">→ Go to Login</a></p>
+    `;
+  } else {
+    alert(res.error || 'Error');
   }
 }
 </script>
