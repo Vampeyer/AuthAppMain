@@ -5,14 +5,12 @@
   <title>Profile</title>
   <base href="/streampaltest/public/">
   <link rel="stylesheet" href="css/styles.css">
+  <script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
   <nav>
-    <a href="index.html">Home</a> | 
-    <a href="profile.html">Profile</a> | 
-    <a href="https://authappmain.onrender.com/premium/" target="_blank">Premium</a>
+    <a href="index.html">Home</a> | <a href="profile.html">Profile</a> | <a href="https://authappmain.onrender.com/premium/" target="_blank">Premium</a>
   </nav>
-
   <div class="container">
     <h2>Profile</h2>
     <div id="content">Loading...</div>
@@ -23,44 +21,88 @@ const BACKEND_URL = 'https://authappmain.onrender.com';
 const token = localStorage.getItem('jwt');
 
 async function load() {
-  const el = document.getElementById('content');
-  if (!token) return el.innerHTML = 'Not logged in → <a href="login.html">Login</a>';
-
-  const res = await fetch(`${BACKEND_URL}/api/me`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-
-  if (!res.ok) {
-    localStorage.removeItem('jwt');
-    return el.innerHTML = 'Expired → <a href="login.html">Login again</a>';
+  const content = document.getElementById('content');
+  if (!token) {
+    content.innerHTML = 'Not logged in → <a href="login.html">Login</a>';
+    return;
   }
 
-  const u = await res.json();
-  el.innerHTML = `
-    <h3>Welcome <strong>${u.username}</strong>!</h3>
-    <p>Email: ${u.email}</p>
-    <p>Status: <strong style="color:${u.subscription_active?'lime':'red'}">
-      ${u.subscription_active ? 'ACTIVE ('+u.days_left+' days)' : 'INACTIVE'}
-    </strong></p>
-    ${u.subscription_active ? '' : `
-      <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')">Weekly $2.95</button>
-      <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')">Monthly $7.75</button>
-    `}
-    <p><button onclick="localStorage.removeItem('jwt');location='login.html'">Logout</button></p>
-  `;
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/me`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Session invalid');
+
+    const u = await res.json();
+    let subscriptionSection = '';
+
+    if (u.subscription_active) {
+      subscriptionSection = `
+        <p>Status: <strong style="color:lime">ACTIVE (${u.days_left} days left)</strong></p>
+        <p><a href="https://authappmain.onrender.com/premium/" target="_blank">→ Access Premium Content</a></p>
+        <button onclick="cancelSub()" style="background:red;color:white;padding:12px 24px">Cancel Subscription</button>
+      `;
+    } else {
+      subscriptionSection = `
+        <p>Status: <strong style="color:red">INACTIVE</strong></p>
+        <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:#0066ff;color:white;padding:12px 24px">Weekly $2.95</button>
+        <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" style="background:#00aa00;color:white;padding:12px 24px">Monthly $7.75</button>
+        <button onclick="buy('price_1SXOVuFF2HALdyFk95SThAcM')" style="background:#ff9900;color:white;padding:12px 24px">Yearly $59.95</button>
+      `;
+    }
+
+    content.innerHTML = `
+      <h3>Welcome <strong>${u.username}</strong>!</h3>
+      <p>Email: ${u.email}</p>
+      ${subscriptionSection}
+      <p><button onclick="logout()" style="margin-top:20px">Logout</button></p>
+    `;
+
+    // Check if returning from successful payment and force reload
+    if (location.search.includes('success=1')) {
+      alert('Payment successful! Refreshing status...');
+      location.href = 'profile.html';
+    }
+  } catch {
+    localStorage.removeItem('jwt');
+    content.innerHTML = 'Session expired → <a href="login.html">Login</a>';
+  }
 }
 
-function buy(id) {
+function buy(priceId) {
   fetch(`${BACKEND_URL}/api/create-checkout-session`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({ price_id: id })
+    body: JSON.stringify({ price_id: priceId })
   })
   .then(r => r.json())
-  .then(d => d.url && (location.href = d.url));
+  .then(d => {
+    if (d.url) location.href = d.url;
+  });
+}
+
+function cancelSub() {
+  if (confirm('Cancel immediately?')) {
+    fetch(`${BACKEND_URL}/api/cancel-subscription-now`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        alert('Cancelled');
+        load();
+      }
+    });
+  }
+}
+
+function logout() {
+  localStorage.removeItem('jwt');
+  location.href = 'login.html';
 }
 
 load();

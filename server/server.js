@@ -1,5 +1,5 @@
 // server.js — FINAL 100% WORKING VERSION (Dec 2025)
-// localStorage JWT + Premium Folder + Clean Price Logic + No CORS Errors
+// localStorage JWT + Premium Folder + Clean Price Logic + No CORS Errors + Webhook Logging
 
 require('dotenv').config({ path: '.env.production' });
 
@@ -134,25 +134,33 @@ app.get('/api/me', requireAuth, async (req, res) => {
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   const { price_id } = req.body;
 
-  const session = await stripe.checkout.sessions.create({
-    mode: 'subscription',
-    payment_method_types: ['card'],
-    line_items: [{ price: price_id, quantity: 1 }],
-    client_reference_id: req.userId.toString(),
-    success_url: 'https://techsport.app/streampaltest/public/profile.html?success=1',
-    cancel_url: 'https://techsport.app/streampaltest/public/profile.html',
-  });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: price_id, quantity: 1 }],
+      client_reference_id: req.userId.toString(),
+      success_url: 'https://techsport.app/streampaltest/public/profile.html?success=1',
+      cancel_url: 'https://techsport.app/streampaltest/public/profile.html',
+    });
 
-  res.json({ url: session.url });
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('Checkout error:', err);
+    res.status(500).json({ error: 'Failed to create session' });
+  }
 });
 
 // ==================== STRIPE WEBHOOK ====================
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  console.log('Webhook received:', req.body); // Log incoming webhook for debugging
+
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    console.log('Webhook verified:', event.type); // Log successful verification
   } catch (err) {
     console.log('Webhook signature failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -161,7 +169,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const userId = session.client_reference_id;
-    const priceId = session.display_items?.[0]?.price?.id || '';
+    const priceId = session.line_items.data[0].price.id; // FIXED: Use correct path for price ID
 
     let periodEnd = Math.floor(Date.now() / 1000) + 30 * 86400; // default: 30 days
 
@@ -175,16 +183,19 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       periodEnd = Math.floor(Date.now() / 1000) + 365 * 86400; // Yearly
     }
 
-    await pool.query(
-      `UPDATE users 
-       SET subscription_status = 'active', 
-           subscription_period_end = ?,
-           stripe_subscription_id = ?
-       WHERE id = ?`,
-      [periodEnd, session.subscription, userId]
-    );
-
-    console.log(`Subscription activated for user ${userId} until ${new Date(periodEnd * 1000).toLocaleDateString()}`);
+    try {
+      await pool.query(
+        `UPDATE users 
+         SET subscription_status = 'active', 
+             subscription_period_end = ?,
+             stripe_subscription_id = ?
+         WHERE id = ?`,
+        [periodEnd, session.subscription, userId]
+      );
+      console.log(`Subscription activated for user ${userId} until ${new Date(periodEnd * 1000).toLocaleDateString()}`); // Log success
+    } catch (dbErr) {
+      console.error('DB update error:', dbErr); // Log DB failure
+    }
   }
 
   res.json({ received: true });

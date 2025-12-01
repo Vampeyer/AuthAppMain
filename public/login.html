@@ -18,7 +18,6 @@
     <button onclick="login()">Login</button>
   </div>
 
-
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
 
@@ -29,24 +28,25 @@ async function login() {
     phrase: document.getElementById('phrase').value.trim()
   };
 
-  const res = await fetch(`${BACKEND_URL}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
 
-  const json = await res.json();
+    const json = await res.json();
 
-  if (json.success && json.token) {
-    localStorage.setItem('jwt', json.token);
-    location.href = 'profile.html';
-  } else {
-    alert('Wrong credentials');
+    if (json.success && json.token) {
+      localStorage.setItem('jwt', json.token);
+      location.href = 'profile.html';
+    } else {
+      alert('Wrong username, password, or phrase');
+    }
+  } catch (e) {
+    alert('Server error');
   }
 }
 </script>
-
-
-
 </body>
 </html>
