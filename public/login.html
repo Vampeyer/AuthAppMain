@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Login</title>
+  <title>Sign Up</title>
   <base href="/streampaltest/public/">
   <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -11,39 +11,39 @@
     <a href="index.html">Home</a> | <a href="signup.html">Sign Up</a> | <a href="login.html">Login</a>
   </nav>
   <div class="container">
-    <h2>Login</h2>
+    <h2>Sign Up</h2>
     <input type="text" id="username" placeholder="Username"><br><br>
+    <input type="email" id="email" placeholder="Email"><br><br>
     <input type="password" id="password" placeholder="Password"><br><br>
-    <textarea id="phrase" placeholder="12-word recovery phrase" rows="3"></textarea><br><br>
-    <button onclick="login()">Login</button>
+    <button onclick="signup()">Sign Up</button>
+    <p id="phrase" style="display:none"></p>
   </div>
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-console.log('LOGIN → Backend:', BACKEND_URL);
 
-async function login() {
+async function signup() {
   const data = {
     username: document.getElementById('username').value.trim(),
-    password: document.getElementById('password').value,
-    phrase: document.getElementById('phrase').value.trim()
+    email: document.getElementById('email').value.trim(),
+    password: document.getElementById('password').value
   };
 
   try {
-    const res = await fetch(`${BACKEND_URL}/api/login`, {
+    const res = await fetch(`${BACKEND_URL}/api/signup`, {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
 
     const json = await res.json();
-    console.log('Response:', json);
-
     if (json.success) {
-      location.href = 'profile.html';
+      localStorage.setItem('jwt', json.token);
+      document.getElementById('phrase').innerHTML = `Your recovery phrase: <strong>${json.phrase}</strong>. Save it!`;
+      document.getElementById('phrase').style.display = 'block';
+      setTimeout(() => location.href = 'profile.html', 5000);
     } else {
-      alert('Wrong username, password, or phrase');
+      alert(json.error);
     }
   } catch (e) {
     alert('Server error');

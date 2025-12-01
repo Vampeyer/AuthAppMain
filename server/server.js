@@ -1,4 +1,4 @@
-// server.js — FINAL FIXED VERSION WITH EXTRA CONSOLE LOGS FOR DEBUGGING
+// server.js — UPDATED FOR LOCALSTORAGE JWT + SUBSCRIPTIONS FOLDER
 require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
@@ -6,7 +6,6 @@ console.log('BACKEND STARTING — FULLY WORKING WITH LOGS');
 console.log('================================================');
 
 const express = require('express');
-const cookieParser = require('cookie-parser');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -39,7 +38,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ==================== JWT ====================
@@ -51,10 +49,15 @@ const verifyToken = (token) => {
 };
 
 const requireAuth = (req, res, next) => {
-  const token = req.cookies.jwt;
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log('%cAUTH FAILED → No token', 'color:red');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const token = authHeader.split(' ')[1];
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('%cAUTH FAILED → No valid JWT', 'color:red');
+    console.log('%cAUTH FAILED → Invalid token', 'color:red');
     return res.status(401).json({ error: 'Unauthorized' });
   }
   req.userId = payload.userId;
@@ -62,9 +65,28 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
+// ==================== PROTECTED SUBSCRIPTIONS FOLDER ====================
+app.use('/subscriptions', requireAuth, async (req, res, next) => {
+  try {
+    const [[user]] = await pool.query(
+      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
+      [req.userId]
+    );
+    const now = Math.floor(Date.now() / 1000);
+    if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
+      console.log('%cACCESS DENIED → No active subscription', 'color:red');
+      return res.status(403).json({ error: 'No active subscription' });
+    }
+    next();
+  } catch (err) {
+    console.error('Subscription check error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+}, express.static(path.join(__dirname, '..', 'subscriptions')));
+
 // ==================== ROUTES ====================
 
-// SIGNUP — FIXED WITH DETAILED ERROR LOGGING
+// SIGNUP — FIXED WITH DETAILED ERROR LOGGING + TOKEN IN RESPONSE
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
   console.log('%cSIGNUP ATTEMPT →', 'color:orange', { username, email });
@@ -81,15 +103,17 @@ app.post('/api/signup', async (req, res) => {
       [username, email, hash, phrase]
     );
 
+    const token = generateToken(result.insertId);
+
     console.log('%cNEW USER CREATED → ID:', 'color:lime', result.insertId);
-    res.json({ success: true, phrase });
+    res.json({ success: true, phrase, token });
   } catch (err) {
     console.error('%cSignup error → Full Details:', 'color:red', { message: err.message, code: err.code, stack: err.stack });
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
-// LOGIN
+// LOGIN + TOKEN IN RESPONSE
 app.post('/api/login', async (req, res) => {
   const { username, password, phrase } = req.body;
   console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
@@ -102,16 +126,9 @@ app.post('/api/login', async (req, res) => {
     const phraseOk = user.phrase.trim() === phrase.trim();
 
     if (passOk && phraseOk) {
-      res.cookie('jwt', generateToken(user.id), {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none',
-        path: '/',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-
-      console.log('%cLOGIN SUCCESS → Cookie sent', 'color:lime');
-      return res.json({ success: true });
+      const token = generateToken(user.id);
+      console.log('%cLOGIN SUCCESS → Token generated', 'color:lime');
+      return res.json({ success: true, token });
     } else {
       console.log('%cLOGIN FAILED → Wrong credentials', 'color:red');
       res.status(401).json({ success: false });
@@ -123,7 +140,6 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/logout', (req, res) => {
-  res.clearCookie('jwt', { sameSite: 'none', secure: true, path: '/' });
   res.json({ success: true });
 });
 
@@ -143,18 +159,13 @@ app.get('/api/me', requireAuth, async (req, res) => {
     if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
       await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
-      console.log('%cSUB AUTO-EXPIRED → User ID:', 'color:orange', req.userId, 'Old End:', user.subscription_period_end, 'Now:', now);
     }
-
-    const daysLeft = active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0;
-
-    console.log('%cPROFILE DATA →', 'color:lime', { username: user.username, active, daysLeft, periodEnd: user.subscription_period_end, endDate: new Date(user.subscription_period_end * 1000) });
 
     res.json({
       username: user.username,
       email: user.email,
       subscription_active: active,
-      days_left: daysLeft
+      days_left: active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0
     });
   } catch (err) {
     console.error('Profile error:', err);
@@ -162,30 +173,30 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
-// CREATE CHECKOUT SESSION
+// CHECKOUT
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   const { price_id } = req.body;
-  console.log('%cCHECKOUT START → User ID:', 'color:purple', req.userId, 'Price ID:', price_id);
+  console.log('%cCHECKOUT START → Price ID:', 'color:cyan', price_id, 'User ID:', req.userId);
 
   try {
-    const [[user]] = await pool.query('SELECT stripe_customer_id, email FROM users WHERE id = ?', [req.userId]);
+    const [[user]] = await pool.query('SELECT stripe_customer_id FROM users WHERE id = ?', [req.userId]);
     let customerId = user.stripe_customer_id;
 
     if (!customerId) {
-      const customer = await stripe.customers.create({ email: user.email });
+      const customer = await stripe.customers.create({ metadata: { userId: req.userId.toString() } });
       customerId = customer.id;
       await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [customerId, req.userId]);
-      console.log('%cNEW STRIPE CUSTOMER CREATED → ID:', 'color:cyan', customerId);
+      console.log('%cNEW CUSTOMER CREATED → ID:', 'color:cyan', customerId);
     }
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'subscription', // Subscription for subscription ,/ "payment" for single purchasse items
-      success_url: 'https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'https://techsport.app/streampaltest/public/profile.html?cancel=true',
-      metadata: { userId: req.userId.toString(), priceId: price_id }  // Fixed capitalization to priceId
+      mode: 'subscription',
+      success_url: `${process.env.APP_URL}/profile.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.APP_URL}/profile.html?cancel=true`,
+      metadata: { userId: req.userId.toString(), priceId: price_id }
     });
 
     console.log('%cCHECKOUT SESSION CREATED → ID:', 'color:lime', session.id);
@@ -196,7 +207,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK
+// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK + TOKEN IN RESPONSE
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
@@ -229,24 +240,20 @@ app.get('/api/recover-session', async (req, res) => {
 
     let periodEnd = sub.current_period_end;
     if (!periodEnd || periodEnd <= 0) {
-
-if (!periodEnd || periodEnd <= 0) {
-  // Fallback to hardcoded based on priceId
-  const priceId = session.metadata?.priceId;
-  const now = Math.floor(Date.now() / 1000);
-  if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
-    periodEnd = now + 7 * 86400;
-  } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
-    periodEnd = now + 30 * 86400;
-  } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
-    periodEnd = now + 365 * 86400;
-  } else {
-    console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
-    return res.status(400).json({ error: 'Unknown product' });
-  }
-  console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
-} 
-    
+      // Fallback to hardcoded based on priceId
+      const priceId = session.metadata?.priceId;
+      const now = Math.floor(Date.now() / 1000);
+      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+        periodEnd = now + 7 * 86400;
+      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+        periodEnd = now + 30 * 86400;
+      } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
+        periodEnd = now + 365 * 86400;
+      } else {
+        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
+        return res.status(400).json({ error: 'Unknown product' });
+      }
+      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
     }
 
     const stripeSubId = sub.id;
@@ -259,16 +266,9 @@ if (!periodEnd || periodEnd <= 0) {
 
     console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
-    res.cookie('jwt', generateToken(userId), {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    console.log('%cRECOVER SUCCESS → Cookie re-issued for User ID:', 'color:lime', userId);
-    res.json({ success: true });
+    const token = generateToken(userId);
+    console.log('%cRECOVER SUCCESS → Token generated for User ID:', 'color:lime', userId);
+    res.json({ success: true, token });
   } catch (err) {
     console.error('Recover error:', err);
     res.status(500).json({ error: 'Failed' });
@@ -286,7 +286,7 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No subscription' });
     }
 
-    await stripe.subscriptions.cancel(user.stripe_subscription_id);  // <-- Changed 'del' to 'cancel' (correct Stripe method)
+    await stripe.subscriptions.cancel(user.stripe_subscription_id);
     await pool.query(
       'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
       [req.userId]

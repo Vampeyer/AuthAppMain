@@ -30,9 +30,14 @@ async function loadProfile() {
   if (sessionId) {
     console.log('Recovering session from Stripe:', sessionId);
     try {
-      const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`, { credentials: 'include' });
+      const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`);
+      const json = await recoverRes.json();
       console.log('Recover response status:', recoverRes.status);
-      if (!recoverRes.ok) console.log('Recover failed with status:', recoverRes.status);
+      if (recoverRes.ok && json.success) {
+        localStorage.setItem('jwt', json.token);
+      } else {
+        console.log('Recover failed with status:', recoverRes.status);
+      }
       history.replaceState(null, '', 'profile.html');
     } catch (e) {
       console.error('Recover session failed:', e);
@@ -41,8 +46,15 @@ async function loadProfile() {
 
   try {
     console.log('Fetching /api/me');
-    const res = await fetch(`${BACKEND}/api/me`, { credentials: 'include' });
+    const token = localStorage.getItem('jwt');
+    const res = await fetch(`${BACKEND}/api/me`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
     console.log('/api/me status:', res.status);
+    if (res.status === 401) {
+      location.href = 'login.html';
+      return;
+    }
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
     console.log('User data received:', u);
@@ -59,7 +71,6 @@ async function loadProfile() {
           Cancel Subscription
         </button>
       ` : `
-      '
         <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:#1565c0;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
           Weekly $2.95
         </button>
@@ -71,8 +82,6 @@ async function loadProfile() {
         <button onclick="buy('price_1SXOVuFF2HALdyFk95SThAcM')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
           Yearly $75.00
         </button>
-
-
       `}
 
       <p><button onclick="logout()" style="margin-top:20px;padding:10px 20px;background:#555;color:white;border:none;border-radius:4px;">Logout</button></p>
@@ -96,9 +105,10 @@ async function loadProfile() {
 
 function buy(id) {
   console.log('Buy start, price ID:', id);
+  const token = localStorage.getItem('jwt');
   fetch(`${BACKEND}/api/create-checkout-session`, {
-    method: 'POST', credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify({ price_id: id })
   })
   .then(r => r.json())
@@ -112,7 +122,11 @@ function buy(id) {
 function cancelSub() {
   console.log('Cancel start');
   if (confirm('Cancel your subscription immediately?\n\nYou will lose access now.')) {
-    fetch(`${BACKEND}/api/cancel-subscription-now`, { method: 'POST', credentials: 'include' })
+    const token = localStorage.getItem('jwt');
+    fetch(`${BACKEND}/api/cancel-subscription-now`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
       .then(() => { alert('Cancelled.'); loadProfile(); })
       .catch(e => console.error('Cancel error:', e));
   }
@@ -120,9 +134,8 @@ function cancelSub() {
 
 function logout() {
   console.log('Logout start');
-  fetch(`${BACKEND}/api/logout`, { credentials: 'include' })
-    .then(() => location.href = 'login.html')
-    .catch(e => console.error('Logout error:', e));
+  localStorage.removeItem('jwt');
+  location.href = 'login.html';
 }
 
 loadProfile();
