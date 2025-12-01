@@ -1,12 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Profile</title>
+  <base href="/streampaltest/public/">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav>
+    <a href="index.html">Home</a> | 
+    <a href="profile.html">Profile</a> | 
+    <a href="https://authappmain.onrender.com/premium/" target="_blank">Premium</a>
+  </nav>
+
+  <div class="container">
+    <h2>Profile</h2>
+    <div id="content">Loading...</div>
+  </div>
+
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
 const token = localStorage.getItem('jwt');
 
 async function load() {
-  if (!token) {
-    document.getElementById('content').innerHTML = 'Not logged in → <a href="login.html">Login</a>';
-    return;
-  }
+  const el = document.getElementById('content');
+  if (!token) return el.innerHTML = 'Not logged in → <a href="login.html">Login</a>';
 
   const res = await fetch(`${BACKEND_URL}/api/me`, {
     headers: { 'Authorization': `Bearer ${token}` }
@@ -14,31 +32,38 @@ async function load() {
 
   if (!res.ok) {
     localStorage.removeItem('jwt');
-    document.getElementById('content').innerHTML = 'Session expired → <a href="login.html">Login</a>';
-    return;
+    return el.innerHTML = 'Expired → <a href="login.html">Login again</a>';
   }
 
   const u = await res.json();
-  // ... rest of your profile display
+  el.innerHTML = `
+    <h3>Welcome <strong>${u.username}</strong>!</h3>
+    <p>Email: ${u.email}</p>
+    <p>Status: <strong style="color:${u.subscription_active?'lime':'red'}">
+      ${u.subscription_active ? 'ACTIVE ('+u.days_left+' days)' : 'INACTIVE'}
+    </strong></p>
+    ${u.subscription_active ? '' : `
+      <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')">Weekly $2.95</button>
+      <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')">Monthly $7.75</button>
+    `}
+    <p><button onclick="localStorage.removeItem('jwt');location='login.html'">Logout</button></p>
+  `;
 }
 
-function buy(priceId) {
+function buy(id) {
   fetch(`${BACKEND_URL}/api/create-checkout-session`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({ price_id: priceId })
+    body: JSON.stringify({ price_id: id })
   })
   .then(r => r.json())
   .then(d => d.url && (location.href = d.url));
 }
 
-function logout() {
-  localStorage.removeItem('jwt');
-  location.href = 'login.html';
-}
-
 load();
 </script>
+</body>
+</html>
