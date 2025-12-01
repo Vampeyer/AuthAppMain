@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Payment Success</title>
+  <base href="/streampaltest/public/">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="container" style="text-align:center;padding:100px;">
+    <h1 style="color:green;">✓ Payment Successful!</h1>
+    <p>Your subscription is now active.</p>
+    <script>
+      // Small delay then redirect
+      setTimeout(() => {
+        location.href = 'profile.html';
+      }, 2000);
+    </script>
+  </div>
+</body>
+</html>
