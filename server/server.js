@@ -1,4 +1,4 @@
-// server.js — UPDATED FOR COOKIE JWT + SUBSCRIPTIONS FOLDER WITH REDIRECTS
+// server.js — UPDATED FOR COOKIE JWT + SUBSCRIPTIONS FOLDER WITH ERROR MESSAGES
 require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
@@ -58,7 +58,10 @@ const requireAuth = (req, res, next) => {
     if (req.path.startsWith('/api/')) {
       return res.status(401).json({ error: 'Unauthorized' });
     } else {
-      return res.redirect('https://techsport.app/streampaltest/public/login.html');
+      return res.status(401).send(`
+        <h1>Login Required</h1>
+        <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a> to access this content.</p>
+      `);
     }
   }
   req.userId = payload.userId;
@@ -76,7 +79,10 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     const now = Math.floor(Date.now() / 1000);
     if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
       console.log('%cACCESS DENIED → No active subscription', 'color:red');
-      return res.redirect('https://techsport.app/streampaltest/public/profile.html');
+      return res.status(403).send(`
+        <h1>Subscription Required</h1>
+        <p>You need an active subscription to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
+      `);
     }
     next();
   } catch (err) {
