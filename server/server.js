@@ -1,4 +1,4 @@
-// server.js — UPDATED FOR LOCALSTORAGE JWT + SUBSCRIPTIONS FOLDER
+// server.js — UPDATED FOR COOKIE JWT + SUBSCRIPTIONS FOLDER WITH REDIRECTS
 require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
@@ -6,6 +6,7 @@ console.log('BACKEND STARTING — FULLY WORKING WITH LOGS');
 console.log('================================================');
 
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -38,6 +39,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ==================== JWT ====================
@@ -49,16 +51,11 @@ const verifyToken = (token) => {
 };
 
 const requireAuth = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.log('%cAUTH FAILED → No token', 'color:red');
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const token = authHeader.split(' ')[1];
+  const token = req.cookies.jwt;
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('%cAUTH FAILED → Invalid token', 'color:red');
-    return res.status(401).json({ error: 'Unauthorized' });
+    console.log('%cAUTH FAILED → No valid JWT', 'color:red');
+    return res.redirect('https://techsport.app/streampaltest/public/login.html');
   }
   req.userId = payload.userId;
   console.log('%cAUTH SUCCESS → User ID:', 'color:lime', req.userId);
@@ -75,18 +72,18 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     const now = Math.floor(Date.now() / 1000);
     if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
       console.log('%cACCESS DENIED → No active subscription', 'color:red');
-      return res.status(403).json({ error: 'No active subscription' });
+      return res.redirect('https://techsport.app/streampaltest/public/profile.html');
     }
     next();
   } catch (err) {
     console.error('Subscription check error:', err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).send('<h1>Server Error</h1><p>Please try again later.</p>');
   }
 }, express.static(path.join(__dirname, '..', 'subscriptions')));
 
 // ==================== ROUTES ====================
 
-// SIGNUP — FIXED WITH DETAILED ERROR LOGGING + TOKEN IN RESPONSE
+// SIGNUP — FIXED WITH DETAILED ERROR LOGGING + COOKIE
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
   console.log('%cSIGNUP ATTEMPT →', 'color:orange', { username, email });
@@ -103,17 +100,23 @@ app.post('/api/signup', async (req, res) => {
       [username, email, hash, phrase]
     );
 
-    const token = generateToken(result.insertId);
+    res.cookie('jwt', generateToken(result.insertId), {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
 
     console.log('%cNEW USER CREATED → ID:', 'color:lime', result.insertId);
-    res.json({ success: true, phrase, token });
+    res.json({ success: true, phrase });
   } catch (err) {
     console.error('%cSignup error → Full Details:', 'color:red', { message: err.message, code: err.code, stack: err.stack });
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
-// LOGIN + TOKEN IN RESPONSE
+// LOGIN + COOKIE
 app.post('/api/login', async (req, res) => {
   const { username, password, phrase } = req.body;
   console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
@@ -126,9 +129,16 @@ app.post('/api/login', async (req, res) => {
     const phraseOk = user.phrase.trim() === phrase.trim();
 
     if (passOk && phraseOk) {
-      const token = generateToken(user.id);
-      console.log('%cLOGIN SUCCESS → Token generated', 'color:lime');
-      return res.json({ success: true, token });
+      res.cookie('jwt', generateToken(user.id), {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        path: '/',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      console.log('%cLOGIN SUCCESS → Cookie sent', 'color:lime');
+      return res.json({ success: true });
     } else {
       console.log('%cLOGIN FAILED → Wrong credentials', 'color:red');
       res.status(401).json({ success: false });
@@ -140,6 +150,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/logout', (req, res) => {
+  res.clearCookie('jwt', { sameSite: 'none', secure: true, path: '/' });
   res.json({ success: true });
 });
 
@@ -207,7 +218,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK + TOKEN IN RESPONSE
+// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK + COOKIE
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
@@ -266,9 +277,16 @@ app.get('/api/recover-session', async (req, res) => {
 
     console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
-    const token = generateToken(userId);
-    console.log('%cRECOVER SUCCESS → Token generated for User ID:', 'color:lime', userId);
-    res.json({ success: true, token });
+    res.cookie('jwt', generateToken(userId), {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    console.log('%cRECOVER SUCCESS → Cookie sent for User ID:', 'color:lime', userId);
+    res.json({ success: true });
   } catch (err) {
     console.error('Recover error:', err);
     res.status(500).json({ error: 'Failed' });

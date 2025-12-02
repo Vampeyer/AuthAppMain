@@ -11,7 +11,7 @@
   <nav>
     <a href="index.html">Home</a> |
     <a href="profile.html">Profile</a> |
-    <a href="#" onclick="loadProtected('subscriptions/premium.html'); return false;">Premium</a> |
+    <a href="https://authappmain.onrender.com/subscriptions/premium.html">Premium</a> |
     <a href="#" onclick="logout(); return false;">Logout</a>
   </nav>
 
@@ -21,7 +21,7 @@
   </div>
 
 <script>
-let BACKEND = 'https://authappmain.onrender.com';
+const BACKEND = 'https://authappmain.onrender.com';
 
 async function loadProfile() {
   console.log('LOAD PROFILE START');
@@ -31,14 +31,10 @@ async function loadProfile() {
   if (sessionId) {
     console.log('Recovering session from Stripe:', sessionId);
     try {
-      const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`);
+      const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`, { credentials: 'include' });
       const json = await recoverRes.json();
       console.log('Recover response status:', recoverRes.status);
-      if (recoverRes.ok && json.success) {
-        localStorage.setItem('jwt', json.token);
-      } else {
-        console.log('Recover failed with status:', recoverRes.status);
-      }
+      if (!recoverRes.ok) console.log('Recover failed with status:', recoverRes.status);
       history.replaceState(null, '', 'profile.html');
     } catch (e) {
       console.error('Recover session failed:', e);
@@ -47,12 +43,9 @@ async function loadProfile() {
 
   try {
     console.log('Fetching /api/me');
-    const token = localStorage.getItem('jwt');
-    const res = await fetch(`${BACKEND}/api/me`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await fetch(`${BACKEND}/api/me`, { credentials: 'include' });
     console.log('/api/me status:', res.status);
-    if (res.status === 401) {
+    if (res.status === 302) { // Redirect handled by browser, but just in case
       location.href = 'login.html';
       return;
     }
@@ -106,10 +99,10 @@ async function loadProfile() {
 
 function buy(id) {
   console.log('Buy start, price ID:', id);
-  const token = localStorage.getItem('jwt');
   fetch(`${BACKEND}/api/create-checkout-session`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ price_id: id })
   })
   .then(r => r.json())
@@ -123,10 +116,9 @@ function buy(id) {
 function cancelSub() {
   console.log('Cancel start');
   if (confirm('Cancel your subscription immediately?\n\nYou will lose access now.')) {
-    const token = localStorage.getItem('jwt');
     fetch(`${BACKEND}/api/cancel-subscription-now`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+      credentials: 'include'
     })
       .then(() => { alert('Cancelled.'); loadProfile(); })
       .catch(e => console.error('Cancel error:', e));
@@ -135,48 +127,9 @@ function cancelSub() {
 
 function logout() {
   console.log('Logout start');
-  localStorage.removeItem('jwt');
-  location.href = 'login.html';
-}
-
-function loadProtected(path) {
-  const token = localStorage.getItem('jwt');
-  if (!token) {
-    alert('Please login to access this content.');
-    location.href = 'login.html';
-    return;
-  }
-
-  fetch(`${BACKEND}/${path}`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  })
-  .then(r => {
-    if (r.status === 401) {
-      alert('Please login to access this content.');
-      location.href = 'login.html';
-    } else if (r.status === 403) {
-      alert('You need an active subscription to access this content.');
-      location.href = 'profile.html';
-    } else if (!r.ok) {
-      throw new Error(r.statusText);
-    }
-    const contentType = r.headers.get('content-type');
-    if (contentType && contentType.includes('text/html')) {
-      return r.text().then(html => {
-        document.open();
-        document.write(html);
-        document.close();
-      });
-    } else {
-      return r.blob().then(blob => {
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-      });
-    }
-  })
-  .catch(e => {
-    alert('Error accessing content: ' + e.message);
-  });
+  fetch(`${BACKEND}/api/logout`, { credentials: 'include' })
+    .then(() => location.href = 'login.html')
+    .catch(e => console.error('Logout error:', e));
 }
 
 loadProfile();
