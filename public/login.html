@@ -8,7 +8,7 @@
 </head>
 <body>
   <nav>
-    <a href="index.html">Home</a> | <a href="signup.html">Sign Up</a> | <a href="login.html">Login</a>
+    <a href="index.html">Home</a> | <a href="signup.html">Sign Up</a> | <a href="login.html">Login</a> | <a href="profile.html">Profile</a> | <a href="#" onclick="loadProtected('subscriptions/premium.html'); return false;">Premium</a>
   </nav>
   <div class="container">
     <h2>Login</h2>
@@ -48,6 +48,46 @@ async function login() {
   } catch (e) {
     alert('Server error');
   }
+}
+
+function loadProtected(path) {
+  const token = localStorage.getItem('jwt');
+  if (!token) {
+    alert('Please login to access this content.');
+    location.href = 'login.html';
+    return;
+  }
+
+  fetch(`${BACKEND_URL}/${path}`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  })
+  .then(r => {
+    if (r.status === 401) {
+      alert('Please login to access this content.');
+      location.href = 'login.html';
+    } else if (r.status === 403) {
+      alert('You need an active subscription to access this content.');
+      location.href = 'profile.html';
+    } else if (!r.ok) {
+      throw new Error(r.statusText);
+    }
+    const contentType = r.headers.get('content-type');
+    if (contentType && contentType.includes('text/html')) {
+      return r.text().then(html => {
+        document.open();
+        document.write(html);
+        document.close();
+      });
+    } else {
+      return r.blob().then(blob => {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      });
+    }
+  })
+  .catch(e => {
+    alert('Error accessing content: ' + e.message);
+  });
 }
 </script>
 </body>
