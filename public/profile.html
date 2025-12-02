@@ -45,7 +45,7 @@ async function loadProfile() {
     console.log('Fetching /api/me');
     const res = await fetch(`${BACKEND}/api/me`, { credentials: 'include' });
     console.log('/api/me status:', res.status);
-    if (res.status === 302) { // Redirect handled by browser, but just in case
+    if (res.status === 401) {
       location.href = 'login.html';
       return;
     }

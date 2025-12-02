@@ -55,7 +55,11 @@ const requireAuth = (req, res, next) => {
   const payload = verifyToken(token);
   if (!payload) {
     console.log('%cAUTH FAILED → No valid JWT', 'color:red');
-    return res.redirect('https://techsport.app/streampaltest/public/login.html');
+    if (req.path.startsWith('/api/')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    } else {
+      return res.redirect('https://techsport.app/streampaltest/public/login.html');
+    }
   }
   req.userId = payload.userId;
   console.log('%cAUTH SUCCESS → User ID:', 'color:lime', req.userId);
