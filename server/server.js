@@ -76,8 +76,20 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
       'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
       [req.userId]
     );
+    if (!user) {
+      console.log('%cAUTH FAILED → No user found for ID:', 'color:red', req.userId, 'path:', req.path);
+      return res.status(401).send(`
+        <h1>Login Required</h1>
+        <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a> to access this content.</p>
+      `);
+    }
     const now = Math.floor(Date.now() / 1000);
-    if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
+    let active = user.subscription_status === 'active' && user.subscription_period_end > now;
+    if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
+      await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
+      active = false;
+    }
+    if (!active) {
       console.log('%cACCESS DENIED → No active subscription for User ID:', 'color:red', req.userId, 'path:', req.path);
       return res.status(403).send(`
         <h1>Subscription Required</h1>
@@ -87,10 +99,10 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     console.log('%cSUB ACCESS GRANTED → User ID:', 'color:lime', req.userId, 'path:', req.path);
     next();
   } catch (err) {
-    console.error('Subscription check error:', err);
+    console.error('Subscription check error for path:', req.path, err);
     res.status(500).send('<h1>Server Error</h1><p>Please try again later.</p>');
   }
-}, express.static(path.join(__dirname, '..', 'subscriptions')));
+}, express.static(path.join(__dirname, 'subscriptions')));  // Updated for subscriptions inside server folder
 
 // ==================== ROUTES ====================
 
