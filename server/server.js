@@ -54,7 +54,7 @@ const requireAuth = (req, res, next) => {
   const token = req.cookies.jwt;
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('%cAUTH FAILED → No valid JWT', 'color:red');
+    console.log('%cAUTH FAILED → No valid JWT for path:', 'color:red', req.path);
     if (req.path.startsWith('/api/')) {
       return res.status(401).json({ error: 'Unauthorized' });
     } else {
@@ -65,7 +65,7 @@ const requireAuth = (req, res, next) => {
     }
   }
   req.userId = payload.userId;
-  console.log('%cAUTH SUCCESS → User ID:', 'color:lime', req.userId);
+  console.log('%cAUTH SUCCESS → User ID:', 'color:lime', req.userId, 'for path:', req.path);
   next();
 };
 
@@ -78,12 +78,13 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     );
     const now = Math.floor(Date.now() / 1000);
     if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
-      console.log('%cACCESS DENIED → No active subscription', 'color:red');
+      console.log('%cACCESS DENIED → No active subscription for User ID:', 'color:red', req.userId, 'path:', req.path);
       return res.status(403).send(`
         <h1>Subscription Required</h1>
         <p>You need an active subscription to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
       `);
     }
+    console.log('%cSUB ACCESS GRANTED → User ID:', 'color:lime', req.userId, 'path:', req.path);
     next();
   } catch (err) {
     console.error('Subscription check error:', err);
