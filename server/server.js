@@ -168,7 +168,7 @@ app.get('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// PROFILE + AUTO-EXPIRE + STRIPE SYNC
+// PROFILE + AUTO-EXPIRE + FULL STRIPE SYNC
 app.get('/api/me', requireAuth, async (req, res) => {
   console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
 
@@ -178,18 +178,24 @@ app.get('/api/me', requireAuth, async (req, res) => {
       [req.userId]
     );
 
-    // Sync with Stripe if sub ID exists
+    // Full sync with Stripe if sub ID exists
     if (user.stripe_subscription_id) {
       try {
         const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
-        if (sub.status === 'canceled' || sub.status === 'incomplete_expired' || sub.ended_at) {
+        let newStatus = 'inactive';
+        let newPeriodEnd = 0;
+        if (sub.status === 'active' || sub.status === 'trialing') {
+          newStatus = 'active';
+          newPeriodEnd = sub.current_period_end || Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days if invalid
+        }
+        if (newStatus !== user.subscription_status || newPeriodEnd !== user.subscription_period_end) {
           await pool.query(
-            'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
-            [req.userId]
+            'UPDATE users SET subscription_status = ?, subscription_period_end = ? WHERE id = ?',
+            [newStatus, newPeriodEnd, req.userId]
           );
-          user.subscription_status = 'inactive';
-          user.subscription_period_end = 0;
-          console.log('%cSYNCED FROM STRIPE → Sub inactive for User ID:', 'color:yellow', req.userId);
+          console.log('%cSYNCED FROM STRIPE → Updated status to', 'color:yellow', newStatus, 'for User ID:', req.userId);
+          user.subscription_status = newStatus;
+          user.subscription_period_end = newPeriodEnd;
         }
       } catch (stripeErr) {
         if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
@@ -207,10 +213,10 @@ app.get('/api/me', requireAuth, async (req, res) => {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    let active = user.subscription_status === 'active' && user.subscription_period_end > now;
+    let active = user.subscription_status === 'active';
 
-    if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
-      await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
+    if (user.subscription_status === 'active') {
+      await pool.query('UPDATE users SET subscription_status = "active", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
     }
 
