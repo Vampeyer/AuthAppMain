@@ -215,8 +215,8 @@ app.get('/api/me', requireAuth, async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     let active = user.subscription_status === 'active' && user.subscription_period_end > now;
 
-    if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
-      await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
+    if (user.subscription_status === 'active') {
+      await pool.query('UPDATE users SET subscription_status = "active", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
     }
 
