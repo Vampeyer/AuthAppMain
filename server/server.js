@@ -168,15 +168,43 @@ app.get('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// PROFILE + AUTO-EXPIRE
+// PROFILE + AUTO-EXPIRE + STRIPE SYNC
 app.get('/api/me', requireAuth, async (req, res) => {
   console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
 
   try {
     const [[user]] = await pool.query(
-      'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
+      'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id FROM users WHERE id = ?',
       [req.userId]
     );
+
+    // Sync with Stripe if sub ID exists
+    if (user.stripe_subscription_id) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
+        if (sub.status === 'canceled' || sub.status === 'incomplete_expired' || sub.ended_at) {
+          await pool.query(
+            'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
+            [req.userId]
+          );
+          user.subscription_status = 'inactive';
+          user.subscription_period_end = 0;
+          console.log('%cSYNCED FROM STRIPE → Sub inactive for User ID:', 'color:yellow', req.userId);
+        }
+      } catch (stripeErr) {
+        if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
+          await pool.query(
+            'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
+            [req.userId]
+          );
+          user.subscription_status = 'inactive';
+          user.subscription_period_end = 0;
+          console.log('%cSYNCED FROM STRIPE → Sub missing, set inactive for User ID:', 'color:yellow', req.userId);
+        } else {
+          console.error('Stripe sync error:', stripeErr);
+        }
+      }
+    }
 
     const now = Math.floor(Date.now() / 1000);
     let active = user.subscription_status === 'active' && user.subscription_period_end > now;
@@ -300,18 +328,28 @@ app.get('/api/recover-session', async (req, res) => {
   }
 });
 
-// CANCEL SUBSCRIPTION — FIXED METHOD
+// CANCEL SUBSCRIPTION — FIXED METHOD WITH STRIPE SYNC
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   console.log('%cCANCEL REQUEST → User ID:', 'color:orange', req.userId);
 
   try {
     const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?', [req.userId]);
     if (!user.stripe_subscription_id) {
-      console.log('%cCANCEL FAILED → No subscription', 'color:red');
+      console.log('%cCANCEL FAILED → No subscription in DB', 'color:red');
       return res.status(400).json({ error: 'No subscription' });
     }
 
-    await stripe.subscriptions.cancel(user.stripe_subscription_id);
+    try {
+      await stripe.subscriptions.cancel(user.stripe_subscription_id);
+    } catch (stripeErr) {
+      if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
+        console.log('%cSTRIPE SUB MISSING → Proceeding with DB update for User ID:', 'color:yellow', req.userId);
+      } else {
+        console.error('Cancel Stripe error:', stripeErr);
+        return res.status(500).json({ error: 'Cancel failed' });
+      }
+    }
+
     await pool.query(
       'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
       [req.userId]
