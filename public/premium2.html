@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Premium Content</title>
+  <base href="/streampaltest/public/">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav>
+    <a href="index.html">Home</a> | <a href="profile.html">Profile</a> | <span>Premium</span>
+  </nav>
+  <div class="container" id="premium" style="display:none">
+    <h1>PREMIUM UNLOCKED</h1>
+    <p>Congratulations! You have full access.</p>
+  </div>
+
+  <script>
+  const BACKEND = 'https://authappmain.onrender.com';
+
+  fetch(`${BACKEND}/api/me`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt')}` } })
+    .then(r => {
+      if (r.status === 401) {
+        alert('Please login to access this content.');
+        location.href = 'login.html';
+      } else if (!r.ok) {
+        throw new Error(r.statusText);
+      }
+      return r.json();
+    })
+    .then(u => {
+      if (u.subscription_active) {
+        document.getElementById('premium').style.display = 'block';
+      } else {
+        alert('You need an active subscription to access this content.');
+        location.href = 'profile.html';
+      }
+    })
+    .catch(e => {
+      alert('Error accessing content: ' + e.message);
+      location.href = 'login.html';
+    });
+  </script>
+</body>
+</html>

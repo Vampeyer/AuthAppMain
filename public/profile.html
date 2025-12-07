@@ -52,10 +52,21 @@ async function loadProfile() {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     console.log('/api/me status:', res.status);
-    if (res.status === 401) {
+    if (res.status != 200) {
       location.href = 'login.html';
       return;
     }
+
+  /*  =====WORKING REDIRECT FRONTEND CODE SAMPLE =====
+               === BASED ON RESPONSE STATUS ====
+      if (res.status == 200) {
+      location.href = 'sampredirect.html';
+      return;
+    }
+  */
+
+
+    
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
     console.log('User data received:', u);
