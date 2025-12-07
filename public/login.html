@@ -37,6 +37,13 @@ async function login() {
     });
 
     const json = await res.json();
+
+    if (res.status === 429) {
+      console.log('Client ban log: ' + json.error);
+      alert(json.error); // e.g., "Too many attempts, wait X seconds"
+      return;
+    }
+
     console.log('Response:', json);
 
     if (json.success) {

@@ -141,14 +141,15 @@ app.post('/api/signup', async (req, res) => {
 
 // LOGIN + TOKEN IN RESPONSE + FAIL2BAN
 app.post('/api/login', async (req, res) => {
-  const ip = req.ip || req.connection.remoteAddress;
+  const ip = req.ip || req.connection.remoteAddress; // Get IP for rate limiting
   const rateLimit = checkRateLimit(ip);
   if (rateLimit.banned) {
+    console.log('%cSERVER BAN LOG → IP:', 'color:red', ip, 'banned, remaining:', rateLimit.remaining, 'seconds');
     return res.status(429).json({ success: false, error: `Too many attempts, wait ${rateLimit.remaining} seconds` });
   }
 
   const { username, password, phrase } = req.body;
-  console.log('%cLOGIN ATTEMPT → IP:', 'color:orange', ip, username);
+  console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
 
   try {
     const [[user]] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
