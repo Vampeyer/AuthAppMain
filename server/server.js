@@ -111,14 +111,31 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
 
 // ==================== ROUTES ====================
 
-// SIGNUP — FIXED WITH DETAILED ERROR LOGGING + TOKEN IN RESPONSE
+// SIGNUP — FIXED WITH DETAILED ERROR LOGGING + TOKEN IN RESPONSE + VALIDATION
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
   console.log('%cSIGNUP ATTEMPT →', 'color:orange', { username, email });
 
+  // Basic regex validation to prevent injection and ensure format
+  const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/; // Alphanumeric + underscore, 3-20 chars
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // Basic email format
+  const passwordRegex = /^.{8,}$/; // At least 8 chars
+
+  if (!usernameRegex.test(username)) {
+    return res.status(400).json({ success: false, error: 'Invalid username. Must be 3-20 alphanumeric characters or underscores.' });
+  }
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ success: false, error: 'Invalid email format.' });
+  }
+  if (!passwordRegex.test(password)) {
+    return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
+  }
+
   try {
     const [[exists]] = await pool.query('SELECT 1 FROM users WHERE username = ? OR email = ?', [username, email]);
-    if (exists) return res.status(400).json({ success: false, error: 'Username or email taken' });
+    if (exists) {
+      return res.status(400).json({ success: false, error: 'Username or email already taken.' });
+    }
 
     const phrase = generateMnemonic();
     const hash = await bcrypt.hash(password, 10);
@@ -181,7 +198,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
 
     let synced = false;
 
-    // Sync with Stripe
+    // Sync with Stripe if sub ID exists
     if (user.stripe_subscription_id) {
       try {
         const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
@@ -222,15 +239,17 @@ app.get('/api/me', requireAuth, async (req, res) => {
           user.stripe_subscription_id = null;
         }
       }
-    } else {
-      // Fallback: Search by email
+    }
+
+    // If no sync from ID or inactive, fallback to email search
+    if (!synced || user.subscription_status !== 'active') {
       try {
         const customers = await stripe.customers.search({ query: `email:"${user.email}"` });
-        console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length);
-        if (customers.data.length > 0) {
-          const customer = customers.data[0]; // Assume first match
+        console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length, 'Email:', user.email);
+        for (const customer of customers.data) {
+          console.log('%cCHECKING CUSTOMER → ID:', 'color:cyan', customer.id);
           const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all' });
-          console.log('%cSTRIPE SUBS LISTED FOR CUSTOMER → Found:', 'color:cyan', subs.data.length);
+          console.log('%cSTRIPE SUBS LISTED FOR CUSTOMER → Found:', 'color:cyan', subs.data.length, 'Customer ID:', customer.id);
           const activeSub = subs.data.find(sub => sub.status === 'active' || sub.status === 'trialing');
           if (activeSub) {
             const newPeriodEnd = activeSub.current_period_end || Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
@@ -239,18 +258,20 @@ app.get('/api/me', requireAuth, async (req, res) => {
               [newPeriodEnd, activeSub.id, req.userId]
             );
             synced = true;
-            console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub found, ID:', 'color:yellow', activeSub.id, 'status: active, period_end:', newPeriodEnd, 'for User ID:', req.userId);
+            console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub found, ID:', 'color:yellow', activeSub.id, 'status:', activeSub.status, 'period_end:', newPeriodEnd, 'for User ID:', req.userId, 'from Customer ID:', customer.id);
             user.subscription_status = 'active';
             user.subscription_period_end = newPeriodEnd;
             user.stripe_subscription_id = activeSub.id;
+            break; // Stop after first active sub
           } else {
-            console.log('%cNO ACTIVE SUB FOUND IN STRIPE (EMAIL) → For email:', 'color:cyan', user.email);
+            console.log('%cNO ACTIVE SUB FOR THIS CUSTOMER → Customer ID:', 'color:cyan', customer.id);
           }
-        } else {
-          console.log('%cNO CUSTOMER FOUND IN STRIPE (EMAIL) → For email:', 'color:cyan', user.email);
+        }
+        if (!synced) {
+          console.log('%cNO ACTIVE SUB FOUND ACROSS CUSTOMERS FOR EMAIL →', 'color:cyan', user.email);
         }
       } catch (stripeErr) {
-        console.error('Stripe sync (EMAIL) error:', stripeErr);
+        console.error('Stripe email search error:', stripeErr);
       }
     }
 
