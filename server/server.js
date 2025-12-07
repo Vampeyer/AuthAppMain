@@ -177,6 +177,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
       'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id FROM users WHERE id = ?',
       [req.userId]
     );
+    console.log('%cDB USER FETCHED →', 'color:cyan', { id: req.userId, email: user.email, sub_id: user.stripe_subscription_id, status: user.subscription_status });
 
     let synced = false;
 
@@ -184,6 +185,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
     if (user.stripe_subscription_id) {
       try {
         const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
+        console.log('%cSTRIPE SUB RETRIEVED (ID) → Status:', 'color:cyan', sub.status, 'ID:', user.stripe_subscription_id);
         let newStatus = 'inactive';
         let newPeriodEnd = 0;
         if (sub.status === 'active' || sub.status === 'trialing') {
@@ -191,6 +193,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
           newPeriodEnd = sub.current_period_end;
           if (!newPeriodEnd || newPeriodEnd <= 0) {
             newPeriodEnd = Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
+            console.log('%cFALLBACK PERIOD_END USED → 7 days for User ID:', 'color:yellow', req.userId);
           }
         }
         if (newStatus !== user.subscription_status || newPeriodEnd !== user.subscription_period_end) {
@@ -199,11 +202,14 @@ app.get('/api/me', requireAuth, async (req, res) => {
             [newStatus, newPeriodEnd, req.userId]
           );
           synced = true;
-          console.log('%cSYNCED FROM STRIPE (ID) → Status:', 'color:yellow', newStatus, 'for User ID:', req.userId);
+          console.log('%cSYNCED FROM STRIPE (ID) → Updated status to', 'color:yellow', newStatus, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
           user.subscription_status = newStatus;
           user.subscription_period_end = newPeriodEnd;
+        } else {
+          console.log('%cNO UPDATE NEEDED FROM STRIPE (ID) → Status already synced for User ID:', 'color:cyan', req.userId);
         }
       } catch (stripeErr) {
+        console.error('%cSTRIPE SYNC (ID) ERROR →', 'color:red', stripeErr.message);
         if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
           await pool.query(
             'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
@@ -214,30 +220,34 @@ app.get('/api/me', requireAuth, async (req, res) => {
           user.subscription_status = 'inactive';
           user.subscription_period_end = 0;
           user.stripe_subscription_id = null;
-        } else {
-          console.error('Stripe sync (ID) error:', stripeErr);
         }
       }
     } else {
       // Fallback: Search by email
       try {
         const customers = await stripe.customers.search({ query: `email:"${user.email}"` });
+        console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length);
         if (customers.data.length > 0) {
           const customer = customers.data[0]; // Assume first match
-          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'active' });
-          if (subs.data.length > 0) {
-            const sub = subs.data[0]; // Assume first active
-            const newPeriodEnd = sub.current_period_end || Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
+          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all' });
+          console.log('%cSTRIPE SUBS LISTED FOR CUSTOMER → Found:', 'color:cyan', subs.data.length);
+          const activeSub = subs.data.find(sub => sub.status === 'active' || sub.status === 'trialing');
+          if (activeSub) {
+            const newPeriodEnd = activeSub.current_period_end || Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
             await pool.query(
               'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
-              [newPeriodEnd, sub.id, req.userId]
+              [newPeriodEnd, activeSub.id, req.userId]
             );
             synced = true;
-            console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub found for User ID:', 'color:yellow', req.userId);
+            console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub found, ID:', 'color:yellow', activeSub.id, 'status: active, period_end:', newPeriodEnd, 'for User ID:', req.userId);
             user.subscription_status = 'active';
             user.subscription_period_end = newPeriodEnd;
-            user.stripe_subscription_id = sub.id;
+            user.stripe_subscription_id = activeSub.id;
+          } else {
+            console.log('%cNO ACTIVE SUB FOUND IN STRIPE (EMAIL) → For email:', 'color:cyan', user.email);
           }
+        } else {
+          console.log('%cNO CUSTOMER FOUND IN STRIPE (EMAIL) → For email:', 'color:cyan', user.email);
         }
       } catch (stripeErr) {
         console.error('Stripe sync (EMAIL) error:', stripeErr);
