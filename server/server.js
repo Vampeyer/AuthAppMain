@@ -174,102 +174,84 @@ app.get('/api/me', requireAuth, async (req, res) => {
 
   try {
     const [[user]] = await pool.query(
-      'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id, stripe_customer_id FROM users WHERE id = ?',
+      'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id FROM users WHERE id = ?',
       [req.userId]
     );
-    console.log('%cDB USER FETCHED →', 'color:cyan', { id: req.userId, email: user.email, customer_id: user.stripe_customer_id, sub_id: user.stripe_subscription_id, status: user.subscription_status });
+    console.log('%cDB USER FETCHED →', 'color:cyan', { id: req.userId, email: user.email, sub_id: user.stripe_subscription_id, status: user.subscription_status });
 
     let synced = false;
-    let stripeSub = null;
 
-    // Try sync by customer ID if exists
-    let customerId = user.stripe_customer_id;
-    if (customerId) {
+    // Sync with Stripe
+    if (user.stripe_subscription_id) {
       try {
-        const subs = await stripe.subscriptions.list({ customer: customerId, status: 'all' });
-        console.log('%cSTRIPE SUBS LISTED FOR CUSTOMER ID → Found:', 'color:cyan', subs.data.length, 'Customer ID:', customerId);
-        stripeSub = subs.data.find(sub => sub.status === 'active' || sub.status === 'trialing');
-      } catch (stripeErr) {
-        if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
-          console.log('%cSTRIPE CUSTOMER MISSING → Resetting customer_id for User ID:', 'color:yellow', req.userId);
-          await pool.query('UPDATE users SET stripe_customer_id = NULL WHERE id = ?', [req.userId]);
-          customerId = null;
-        } else {
-          console.error('Stripe customer sync error:', stripeErr);
+        const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
+        console.log('%cSTRIPE SUB RETRIEVED (ID) → Status:', 'color:cyan', sub.status, 'ID:', user.stripe_subscription_id);
+        let newStatus = 'inactive';
+        let newPeriodEnd = 0;
+        if (sub.status === 'active' || sub.status === 'trialing') {
+          newStatus = 'active';
+          newPeriodEnd = sub.current_period_end;
+          if (!newPeriodEnd || newPeriodEnd <= 0) {
+            newPeriodEnd = Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
+            console.log('%cFALLBACK PERIOD_END USED → 7 days for User ID:', 'color:yellow', req.userId);
+          }
         }
-      }
-    }
-
-    // If no active sub from customer ID or no customer ID, fallback to email search
-    if (!stripeSub) {
-      try {
-        const customers = await stripe.customers.search({ query: `email:"${user.email}"` });
-        console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length, 'Email:', user.email);
-        if (customers.data.length > 0) {
-          const customer = customers.data[0]; // Assume first match
-          await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ? AND stripe_customer_id IS NULL', [customer.id, req.userId]);
-          console.log('%cUPDATED DB WITH STRIPE CUSTOMER ID FROM EMAIL → Customer ID:', 'color:yellow', customer.id, 'for User ID:', req.userId);
-          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all' });
-          console.log('%cSTRIPE SUBS LISTED FOR FOUND CUSTOMER → Found:', 'color:cyan', subs.data.length);
-          stripeSub = subs.data.find(sub => sub.status === 'active' || sub.status === 'trialing');
-        } else {
-          console.log('%cNO CUSTOMER FOUND IN STRIPE FOR EMAIL →', 'color:cyan', user.email);
-        }
-      } catch (stripeErr) {
-        console.error('Stripe email search error:', stripeErr);
-      }
-    }
-
-    // Update DB based on found sub
-    if (stripeSub) {
-      const newStatus = 'active';
-      let newPeriodEnd = stripeSub.current_period_end;
-      if (!newPeriodEnd || newPeriodEnd <= 0) {
-        newPeriodEnd = Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
-        console.log('%cFALLBACK PERIOD_END USED → 7 days for User ID:', 'color:yellow', req.userId);
-      }
-      await pool.query(
-        'UPDATE users SET subscription_status = ?, subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
-        [newStatus, newPeriodEnd, stripeSub.id, req.userId]
-      );
-      synced = true;
-      console.log('%cSYNCED FROM STRIPE → Active sub ID:', 'color:yellow', stripeSub.id, 'status:', stripeSub.status, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
-      user.subscription_status = newStatus;
-      user.subscription_period_end = newPeriodEnd;
-      user.stripe_subscription_id = stripeSub.id;
-    } else if (user.stripe_subscription_id) {
-      // If no active but old ID, check and deactivate if needed
-      try {
-        const oldSub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
-        console.log('%cSTRIPE OLD SUB CHECKED → Status:', 'color:cyan', oldSub.status, 'ID:', user.stripe_subscription_id);
-        if (oldSub.status !== 'active' && oldSub.status !== 'trialing') {
+        if (newStatus !== user.subscription_status || newPeriodEnd !== user.subscription_period_end) {
           await pool.query(
-            'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
-            [req.userId]
+            'UPDATE users SET subscription_status = ?, subscription_period_end = ? WHERE id = ?',
+            [newStatus, newPeriodEnd, req.userId]
           );
           synced = true;
-          console.log('%cSYNCED FROM STRIPE → Old sub inactive, reset DB for User ID:', 'color:yellow', req.userId);
-          user.subscription_status = 'inactive';
-          user.subscription_period_end = 0;
-          user.stripe_subscription_id = null;
+          console.log('%cSYNCED FROM STRIPE (ID) → Updated status to', 'color:yellow', newStatus, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
+          user.subscription_status = newStatus;
+          user.subscription_period_end = newPeriodEnd;
+        } else {
+          console.log('%cNO UPDATE NEEDED FROM STRIPE (ID) → Status already synced for User ID:', 'color:cyan', req.userId);
         }
       } catch (stripeErr) {
+        console.error('%cSTRIPE SYNC (ID) ERROR →', 'color:red', stripeErr.message);
         if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
           await pool.query(
             'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
             [req.userId]
           );
           synced = true;
-          console.log('%cSYNCED FROM STRIPE → Old sub missing, reset DB for User ID:', 'color:yellow', req.userId);
+          console.log('%cSYNCED FROM STRIPE (ID) → Sub missing, set inactive for User ID:', 'color:yellow', req.userId);
           user.subscription_status = 'inactive';
           user.subscription_period_end = 0;
           user.stripe_subscription_id = null;
-        } else {
-          console.error('Stripe old sub check error:', stripeErr);
         }
       }
     } else {
-      console.log('%cNO SYNC NEEDED → No sub ID and no active found for User ID:', 'color:cyan', req.userId);
+      // Fallback: Search by email
+      try {
+        const customers = await stripe.customers.search({ query: `email:"${user.email}"` });
+        console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length);
+        if (customers.data.length > 0) {
+          const customer = customers.data[0]; // Assume first match
+          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all' });
+          console.log('%cSTRIPE SUBS LISTED FOR CUSTOMER → Found:', 'color:cyan', subs.data.length);
+          const activeSub = subs.data.find(sub => sub.status === 'active' || sub.status === 'trialing');
+          if (activeSub) {
+            const newPeriodEnd = activeSub.current_period_end || Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
+            await pool.query(
+              'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
+              [newPeriodEnd, activeSub.id, req.userId]
+            );
+            synced = true;
+            console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub found, ID:', 'color:yellow', activeSub.id, 'status: active, period_end:', newPeriodEnd, 'for User ID:', req.userId);
+            user.subscription_status = 'active';
+            user.subscription_period_end = newPeriodEnd;
+            user.stripe_subscription_id = activeSub.id;
+          } else {
+            console.log('%cNO ACTIVE SUB FOUND IN STRIPE (EMAIL) → For email:', 'color:cyan', user.email);
+          }
+        } else {
+          console.log('%cNO CUSTOMER FOUND IN STRIPE (EMAIL) → For email:', 'color:cyan', user.email);
+        }
+      } catch (stripeErr) {
+        console.error('Stripe sync (EMAIL) error:', stripeErr);
+      }
     }
 
     const now = Math.floor(Date.now() / 1000);
