@@ -3,6 +3,7 @@ require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
 console.log('BACKEND STARTING — FULLY WORKING WITH LOGS');
+console.log("-- single payment mode -- ")
 console.log('================================================');
 
 const express = require('express');
@@ -12,7 +13,6 @@ const jwt = require('jsonwebtoken');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { generateMnemonic } = require('bip39');
 const pool = require('./db');
-const { checkRateLimit, recordFailure, clearAttempts } = require('./fail2ban');
 
 const app = express();
 
@@ -139,35 +139,23 @@ app.post('/api/signup', async (req, res) => {
   }
 });
 
-// LOGIN + TOKEN IN RESPONSE + FAIL2BAN
+// LOGIN + TOKEN IN RESPONSE
 app.post('/api/login', async (req, res) => {
-  const ip = req.ip || req.connection.remoteAddress; // Get IP for rate limiting
-  const rateLimit = checkRateLimit(ip);
-  if (rateLimit.banned) {
-    console.log('%cSERVER BAN LOG → IP:', 'color:red', ip, 'banned, remaining:', rateLimit.remaining, 'seconds');
-    return res.status(429).json({ success: false, error: `Too many attempts, wait ${rateLimit.remaining} seconds` });
-  }
-
   const { username, password, phrase } = req.body;
   console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
 
   try {
     const [[user]] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-    if (!user) {
-      recordFailure(ip);
-      return res.status(401).json({ success: false });
-    }
+    if (!user) return res.status(401).json({ success: false });
 
     const passOk = await bcrypt.compare(password, user.password_hash);
     const phraseOk = user.phrase.trim() === phrase.trim();
 
     if (passOk && phraseOk) {
-      clearAttempts(ip);
       const token = generateToken(user.id);
       console.log('%cLOGIN SUCCESS → Token generated', 'color:lime');
       return res.json({ success: true, token });
     } else {
-      recordFailure(ip);
       console.log('%cLOGIN FAILED → Wrong credentials', 'color:red');
       res.status(401).json({ success: false });
     }
@@ -181,7 +169,7 @@ app.get('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// PROFILE + AUTO-EXPIRE + FULL STRIPE SYNC WITH EMAIL FALLBACK
+// PROFILE + AUTO-EXPIRE + STRIPE SYNC FOR SINGLE PAYMENT (MATCH BY EMAIL/USER ID)
 app.get('/api/me', requireAuth, async (req, res) => {
   console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
 
@@ -190,9 +178,6 @@ app.get('/api/me', requireAuth, async (req, res) => {
       'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id FROM users WHERE id = ?',
       [req.userId]
     );
-    console.log('%cDB USER FETCHED →', 'color:cyan', { id: req.userId, email: user.email, sub_id: user.stripe_subscription_id, status: user.subscription_status });
-
-    let synced = false;
 
     // Sync with Stripe if sub ID exists
     if (user.stripe_subscription_id) {
@@ -214,7 +199,6 @@ app.get('/api/me', requireAuth, async (req, res) => {
             'UPDATE users SET subscription_status = ?, subscription_period_end = ? WHERE id = ?',
             [newStatus, newPeriodEnd, req.userId]
           );
-          synced = true;
           console.log('%cSYNCED FROM STRIPE (ID) → Updated status to', 'color:yellow', newStatus, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
           user.subscription_status = newStatus;
           user.subscription_period_end = newPeriodEnd;
@@ -228,17 +212,14 @@ app.get('/api/me', requireAuth, async (req, res) => {
             'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
             [req.userId]
           );
-          synced = true;
           console.log('%cSYNCED FROM STRIPE (ID) → Sub missing, set inactive for User ID:', 'color:yellow', req.userId);
           user.subscription_status = 'inactive';
           user.subscription_period_end = 0;
           user.stripe_subscription_id = null;
         }
       }
-    }
-
-    // If no sync from ID or inactive, fallback to email search for any active sub across customers
-    if (!synced || user.subscription_status !== 'active') {
+    } else {
+      // Fallback: Search by email for active sub
       try {
         const customers = await stripe.customers.search({ query: `email:"${user.email}"` });
         console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length, 'Email:', user.email);
@@ -261,7 +242,6 @@ app.get('/api/me', requireAuth, async (req, res) => {
             'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
             [newPeriodEnd, activeSub.id, req.userId]
           );
-          synced = true;
           console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub ID:', 'color:yellow', activeSub.id, 'status:', activeSub.status, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
           user.subscription_status = 'active';
           user.subscription_period_end = newPeriodEnd;
@@ -294,7 +274,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
-// CHECKOUT
+// CHECKOUT — SINGLE PAYMENT MODE
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   const { price_id } = req.body;
   console.log('%cCHECKOUT START → Price ID:', 'color:cyan', price_id, 'User ID:', req.userId);
@@ -314,7 +294,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'subscription',
+      mode: 'payment',
       success_url: `https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://techsport.app/streampaltest/public/profile.html?cancel=true`,
       metadata: { userId: req.userId.toString(), priceId: price_id }
@@ -339,7 +319,7 @@ app.get('/api/recover-session', async (req, res) => {
   }
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ['subscription'] });
+    const session = await stripe.checkout.sessions.retrieve(session_id);
     console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode, 'Metadata:', session.metadata);
 
     const userId = session.metadata?.userId;
@@ -348,41 +328,45 @@ app.get('/api/recover-session', async (req, res) => {
       return res.status(400).json({ error: 'No user in session' });
     }
 
-    let sub = session.subscription;
-    if (typeof sub === 'string') {
-      sub = await stripe.subscriptions.retrieve(sub);
-      console.log('%cFETCHED FULL SUB SEPARATELY → ID:', 'color:cyan', sub.id);
+    if (session.payment_status !== 'paid') {
+      console.log('%cRECOVER FAILED → Payment not paid', 'color:red');
+      return res.status(400).json({ error: 'Payment not completed' });
     }
 
-    if (!sub) {
-      console.log('%cRECOVER FAILED → No subscription', 'color:red');
-      return res.status(400).json({ error: 'No sub' });
+    const priceId = session.metadata?.priceId;
+    const now = Math.floor(Date.now() / 1000);
+    let periodEnd = 0;
+
+
+/* 
+W - sub 'price_1SIBPkFF2HALdyFkogiGJG5w' 
+W single price_1SYeXVFF2HALdyFkMR0pVo2u
+
+
+M sub  - price_1SIBCzFF2HALdyFk7vOxByGq
+M single -  price_1SYeY3FF2HALdyFk8znKF3un
+
+Y sub price_1SXOVuFF2HALdyFk95SThAcM
+Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
+
+*/
+
+    if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') { // Weekly
+      periodEnd = now + 7 * 86400;
+    } else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') { // Monthly
+      periodEnd = now + 30 * 86400;
+    } else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') { // Yearly
+      periodEnd = now + 365 * 86400;
+    } else {
+      console.log('%cRECOVER FAILED → Unknown priceId', 'color:red', priceId);
+      return res.status(400).json({ error: 'Unknown product' });
     }
 
-    let periodEnd = sub.current_period_end;
-    if (!periodEnd || periodEnd <= 0) {
-      // Fallback to hardcoded based on priceId
-      const priceId = session.metadata?.priceId;
-      const now = Math.floor(Date.now() / 1000);
-      if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
-        periodEnd = now + 7 * 86400;
-      } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
-        periodEnd = now + 30 * 86400;
-      } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
-        periodEnd = now + 365 * 86400;
-      } else {
-        console.log('%cRECOVER FAILED → Unknown priceId for fallback', 'color:red', priceId);
-        return res.status(400).json({ error: 'Unknown product' });
-      }
-      console.log('%cHARDCODED FALLBACK USED → Price ID:', 'color:yellow', priceId, 'New Period End:', periodEnd, 'Date:', new Date(periodEnd * 1000));
-    }
-
-    const stripeSubId = sub.id;
-    console.log('%cSUB DETAILS → ID:', 'color:cyan', stripeSubId, 'Period End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+    console.log('%cSUB DETAILS → Period End UNIX:', 'color:cyan', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     await pool.query(
-      'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
-      [periodEnd, stripeSubId, userId]
+      'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
+      [periodEnd, userId]
     );
 
     console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
@@ -401,7 +385,7 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   console.log('%cCANCEL REQUEST → User ID:', 'color:orange', req.userId);
 
   try {
-    const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?', [req.userId]);
+    const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?',['req.userId']);
     if (!user.stripe_subscription_id) {
       console.log('%cCANCEL FAILED → No subscription in DB', 'color:red');
       return res.status(400).json({ error: 'No subscription' });
