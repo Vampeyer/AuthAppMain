@@ -1,4 +1,4 @@
-// server.js — UPDATED FOR HEADER JWT + SUBSCRIPTIONS FOLDER WITH CONDITIONAL RESPONSES
+// server.js — UPDATED FOR HEADER JWT + SUBSCRIPTIONS FOLDER WITH CONDITIONAL RESPONSES + SINGLE PAYMENT FIX + FAIL2BAN
 require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
@@ -12,6 +12,7 @@ const jwt = require('jsonwebtoken');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { generateMnemonic } = require('bip39');
 const pool = require('./db');
+const { checkRateLimit, recordFailure, clearAttempts } = require('./fail2ban');
 
 const app = express();
 
@@ -138,23 +139,34 @@ app.post('/api/signup', async (req, res) => {
   }
 });
 
-// LOGIN + TOKEN IN RESPONSE
+// LOGIN + TOKEN IN RESPONSE + FAIL2BAN RATE LIMITING
 app.post('/api/login', async (req, res) => {
   const { username, password, phrase } = req.body;
-  console.log('%cLOGIN ATTEMPT →', 'color:orange', username);
+  const ip = req.ip; // Assumes req.ip is available (enable app.set('trust proxy', true) if behind proxy)
+  console.log('%cLOGIN ATTEMPT →', 'color:orange', username, 'IP:', ip);
+
+  const limit = checkRateLimit(ip);
+  if (limit.banned) {
+    return res.status(429).json({ success: false, error: `Too many attempts. Try again in ${limit.remaining} seconds.` });
+  }
 
   try {
     const [[user]] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-    if (!user) return res.status(401).json({ success: false });
+    if (!user) {
+      recordFailure(ip);
+      return res.status(401).json({ success: false });
+    }
 
     const passOk = await bcrypt.compare(password, user.password_hash);
     const phraseOk = user.phrase.trim() === phrase.trim();
 
     if (passOk && phraseOk) {
       const token = generateToken(user.id);
-      console.log('%cLOGIN SUCCESS → Token generated', 'color:lime');
+      clearAttempts(ip);
+      console.log('%cLOGIN SUCCESS → Token generated for User ID:', 'color:lime', user.id);
       return res.json({ success: true, token });
     } else {
+      recordFailure(ip);
       console.log('%cLOGIN FAILED → Wrong credentials', 'color:red');
       res.status(401).json({ success: false });
     }
@@ -164,14 +176,9 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-app.get('/api/logout', (req, res) => {
-  res.json({ success: true });
-});
-
 // PROFILE + AUTO-EXPIRE
 app.get('/api/me', requireAuth, async (req, res) => {
-  console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
-
+  console.log('PROFILE REQUEST → User ID:', req.userId);
   try {
     const [[user]] = await pool.query(
       'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
@@ -198,10 +205,16 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
-// CHECKOUT — SINGLE PAYMENT MODE
+// CHECKOUT — SINGLE PAYMENT MODE (ENHANCED LOGGING FOR PRICE TYPE DEBUG)
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   const { price_id } = req.body;
   console.log('%cCHECKOUT START → Price ID:', 'color:cyan', price_id, 'User ID:', req.userId);
+
+  // Debug log: Warn if price ID appears to be recurring (based on your comments; not foolproof)
+  const subPrices = ['price_1SIBPkFF2HALdyFkogiGJG5w', 'price_1SIBCzFF2HALdyFk7vOxByGq', 'price_1SXOVuFF2HALdyFk95SThAcM'];
+  if (subPrices.includes(price_id)) {
+    console.log('%cWARNING: Price ID appears to be recurring (sub) type! Use single IDs for payment mode.', 'color:yellow');
+  }
 
   try {
     const [[user]] = await pool.query('SELECT stripe_customer_id FROM users WHERE id = ?', [req.userId]);
@@ -218,9 +231,8 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'payment',
-      success_url: `https://techsport.app/streampaltest/public/profile.html?session_
-      id={CHECKOUT_SESSION_ID}`,
+      mode: 'payment',  // Single payment mode
+      success_url: `https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://techsport.app/streampaltest/public/profile.html?cancel=true`,
       metadata: { userId: req.userId.toString(), priceId: price_id }
     });
@@ -233,10 +245,11 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE ACCESS — FIXED WITH HARDCODED PERIOD + TOKEN IN RESPONSE
+// RECOVER + ACTIVATE ACCESS — FIXED WITH HARDCODED PERIOD FOR SINGLE PAYMENTS + TOKEN IN RESPONSE + MORE LOGS
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
+  console.log('%cRECOVER QUERY PARAMS:', 'color:cyan', req.query);
 
   if (!session_id) {
     console.log('%cRECOVER FAILED → No session_id', 'color:red');
@@ -245,7 +258,9 @@ app.get('/api/recover-session', async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('%cSESSION RETRIEVED → Status:', 'color:cyan', session.payment_status, 'Mode:', session.mode, 'Metadata:', session.metadata);
+    console.log('%cSESSION RETRIEVED → Full Session:', 'color:cyan', session);
+    console.log('%cSESSION STATUS:', 'color:cyan', session.payment_status, 'Mode:', session.mode);
+    console.log('%cSESSION METADATA:', 'color:cyan', session.metadata);
 
     const userId = session.metadata?.userId;
     if (!userId) {
@@ -254,34 +269,24 @@ app.get('/api/recover-session', async (req, res) => {
     }
 
     if (session.payment_status !== 'paid') {
-      console.log('%cRECOVER FAILED → Payment not paid', 'color:red');
+      console.log('%cRECOVER FAILED → Payment not paid. Status:', 'color:red', session.payment_status);
       return res.status(400).json({ error: 'Payment not completed' });
     }
 
     const priceId = session.metadata?.priceId;
+    console.log('%cEXTRACTED PRICE ID:', 'color:cyan', priceId);
     const now = Math.floor(Date.now() / 1000);
     let periodEnd = 0;
 
-
-/* 
-W - sub 'price_1SIBPkFF2HALdyFkogiGJG5w' 
-W single price_1SYeXVFF2HALdyFkMR0pVo2u
-
-
-M sub  - price_1SIBCzFF2HALdyFk7vOxByGq
-M single -  price_1SYeY3FF2HALdyFk8znKF3un
-
-Y sub price_1SXOVuFF2HALdyFk95SThAcM
-Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
-
-*/
-
-    if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') { // Weekly
+    if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') { // Weekly single
       periodEnd = now + 7 * 86400;
-    } else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') { // Monthly
+      console.log('%cPERIOD SET → Weekly', 'color:cyan');
+    } else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') { // Monthly single
       periodEnd = now + 30 * 86400;
-    } else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') { // Yearly
+      console.log('%cPERIOD SET → Monthly', 'color:cyan');
+    } else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') { // Yearly single
       periodEnd = now + 365 * 86400;
+      console.log('%cPERIOD SET → Yearly', 'color:cyan');
     } else {
       console.log('%cRECOVER FAILED → Unknown priceId', 'color:red', priceId);
       return res.status(400).json({ error: 'Unknown product' });
@@ -293,6 +298,7 @@ Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
       'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
       [periodEnd, userId]
     );
+    console.log('%cDB UPDATE QUERY EXECUTED → For User ID:', 'color:cyan', userId);
 
     console.log('%cACCESS ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
@@ -334,14 +340,7 @@ app.listen(PORT, () => {
   console.log(`Listening on port ${PORT}`);
 });
 /* 
-W - sub 'price_1SIBPkFF2HALdyFkogiGJG5w' 
 W single price_1SYeXVFF2HALdyFkMR0pVo2u
-
-
-M sub  - price_1SIBCzFF2HALdyFk7vOxByGq
 M single -  price_1SYeY3FF2HALdyFk8znKF3un
-
-Y sub price_1SXOVuFF2HALdyFk95SThAcM
 Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
-
 */

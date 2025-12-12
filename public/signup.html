@@ -41,13 +41,34 @@ async function signup() {
       localStorage.setItem('jwt', json.token);
       document.getElementById('phrase').innerHTML = `Your recovery phrase: <strong>${json.phrase}</strong>. Save it!`;
       document.getElementById('phrase').style.display = 'block';
-      setTimeout(() => location.href = 'profile.html', 5000);
+      
+// 2. Use alert() to ensure the user SEES the keyphrase immediately.
+      alert(`IMPORTANT: Your Recovery Phrase is: \n\n${json.phrase}\n\nCLICK OK, then CONFIRM you have saved it.`);
+
+
+
+      // 3. Use confirm() to get explicit user acknowledgement (returns true for OK)
+      const isConfirmed = confirm(`Have you securely saved your recovery phrase?
+      \n \t ${json.phrase} \n 
+      Press OK to continue to your profile.`);
+      
+      if (isConfirmed) { 
+        setTimeout(()=>{ 
+     location.href = 'profile.html'; 
+         } , 30000) // 15 seconds to redirect
+   
+      } else { 
+        // User pressed 'Cancel' on the confirmation box
+        alert("Please make sure you save your key phrase before proceeding."); 
+      }
     } else {
       alert(json.error);
     }
   } catch (e) {
     alert('Server error');
   }
+
+
 }
 
 function loadProtected(path) {
