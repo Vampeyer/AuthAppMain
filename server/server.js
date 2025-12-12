@@ -219,7 +219,8 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
       mode: 'payment',
-      success_url: `https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `https://techsport.app/streampaltest/public/profile.html?session_
+      id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://techsport.app/streampaltest/public/profile.html?cancel=true`,
       metadata: { userId: req.userId.toString(), priceId: price_id }
     });
@@ -261,11 +262,25 @@ app.get('/api/recover-session', async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     let periodEnd = 0;
 
-    if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
+
+/* 
+W - sub 'price_1SIBPkFF2HALdyFkogiGJG5w' 
+W single price_1SYeXVFF2HALdyFkMR0pVo2u
+
+
+M sub  - price_1SIBCzFF2HALdyFk7vOxByGq
+M single -  price_1SYeY3FF2HALdyFk8znKF3un
+
+Y sub price_1SXOVuFF2HALdyFk95SThAcM
+Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
+
+*/
+
+    if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') { // Weekly
       periodEnd = now + 7 * 86400;
-    } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
+    } else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') { // Monthly
       periodEnd = now + 30 * 86400;
-    } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
+    } else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') { // Yearly
       periodEnd = now + 365 * 86400;
     } else {
       console.log('%cRECOVER FAILED → Unknown priceId', 'color:red', priceId);
