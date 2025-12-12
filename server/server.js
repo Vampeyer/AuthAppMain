@@ -168,96 +168,21 @@ app.get('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// PROFILE + AUTO-EXPIRE + STRIPE SYNC FOR SINGLE PAYMENT (MATCH BY EMAIL/USER ID)
+// PROFILE + AUTO-EXPIRE
 app.get('/api/me', requireAuth, async (req, res) => {
   console.log('%cPROFILE REQUEST → User ID:', 'color:cyan', req.userId);
 
   try {
     const [[user]] = await pool.query(
-      'SELECT username, email, subscription_status, subscription_period_end, stripe_subscription_id FROM users WHERE id = ?',
+      'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
       [req.userId]
     );
-
-    // Sync with Stripe if sub ID exists
-    if (user.stripe_subscription_id) {
-      try {
-        const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
-        console.log('%cSTRIPE SUB RETRIEVED (ID) → Status:', 'color:cyan', sub.status, 'ID:', user.stripe_subscription_id);
-        let newStatus = 'inactive';
-        let newPeriodEnd = 0;
-        if (sub.status === 'active' || sub.status === 'trialing') {
-          newStatus = 'active';
-          newPeriodEnd = sub.current_period_end;
-          if (!newPeriodEnd || newPeriodEnd <= 0) {
-            newPeriodEnd = Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
-            console.log('%cFALLBACK PERIOD_END USED → 7 days for User ID:', 'color:yellow', req.userId);
-          }
-        }
-        if (newStatus !== user.subscription_status || newPeriodEnd !== user.subscription_period_end) {
-          await pool.query(
-            'UPDATE users SET subscription_status = ?, subscription_period_end = ? WHERE id = ?',
-            [newStatus, newPeriodEnd, req.userId]
-          );
-          console.log('%cSYNCED FROM STRIPE (ID) → Updated status to', 'color:yellow', newStatus, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
-          user.subscription_status = newStatus;
-          user.subscription_period_end = newPeriodEnd;
-        } else {
-          console.log('%cNO UPDATE NEEDED FROM STRIPE (ID) → Status already synced for User ID:', 'color:cyan', req.userId);
-        }
-      } catch (stripeErr) {
-        console.error('%cSTRIPE SYNC (ID) ERROR →', 'color:red', stripeErr.message);
-        if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
-          await pool.query(
-            'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
-            [req.userId]
-          );
-          console.log('%cSYNCED FROM STRIPE (ID) → Sub missing, set inactive for User ID:', 'color:yellow', req.userId);
-          user.subscription_status = 'inactive';
-          user.subscription_period_end = 0;
-          user.stripe_subscription_id = null;
-        }
-      }
-    } else {
-      // Fallback: Search by email for active sub
-      try {
-        const customers = await stripe.customers.search({ query: `email:"${user.email}"` });
-        console.log('%cSTRIPE CUSTOMERS SEARCHED BY EMAIL → Found:', 'color:cyan', customers.data.length, 'Email:', user.email);
-        let activeSub = null;
-        for (const customer of customers.data) {
-          console.log('%cCHECKING CUSTOMER → ID:', 'color:cyan', customer.id);
-          const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all' });
-          console.log('%cSTRIPE SUBS LISTED FOR CUSTOMER → Found:', 'color:cyan', subs.data.length, 'Customer ID:', customer.id);
-          activeSub = subs.data.find(sub => sub.status === 'active' || sub.status === 'trialing');
-          if (activeSub) {
-            console.log('%cACTIVE SUB FOUND IN CUSTOMER → ID:', 'color:cyan', activeSub.id, 'Status:', activeSub.status);
-            break;
-          } else {
-            console.log('%cNO ACTIVE SUB FOR THIS CUSTOMER → Customer ID:', 'color:cyan', customer.id);
-          }
-        }
-        if (activeSub) {
-          const newPeriodEnd = activeSub.current_period_end || Math.floor(Date.now() / 1000) + 7 * 86400; // Fallback 7 days
-          await pool.query(
-            'UPDATE users SET subscription_status = "active", subscription_period_end = ?, stripe_subscription_id = ? WHERE id = ?',
-            [newPeriodEnd, activeSub.id, req.userId]
-          );
-          console.log('%cSYNCED FROM STRIPE (EMAIL) → Active sub ID:', 'color:yellow', activeSub.id, 'status:', activeSub.status, 'period_end:', newPeriodEnd, 'for User ID:', req.userId);
-          user.subscription_status = 'active';
-          user.subscription_period_end = newPeriodEnd;
-          user.stripe_subscription_id = activeSub.id;
-        } else {
-          console.log('%cNO ACTIVE SUB FOUND ACROSS ALL CUSTOMERS FOR EMAIL →', 'color:cyan', user.email);
-        }
-      } catch (stripeErr) {
-        console.error('Stripe email search error:', stripeErr);
-      }
-    }
 
     const now = Math.floor(Date.now() / 1000);
     let active = user.subscription_status === 'active' && user.subscription_period_end > now;
 
     if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
-      await pool.query('UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?', [req.userId]);
+      await pool.query('UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
     }
 
@@ -307,7 +232,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE SUBSCRIPTION — FIXED WITH HARDCODED FALLBACK + TOKEN IN RESPONSE
+// RECOVER + ACTIVATE ACCESS — FIXED WITH HARDCODED PERIOD + TOKEN IN RESPONSE
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('%cRECOVER SESSION START → Session ID:', 'color:cyan', session_id);
@@ -336,41 +261,25 @@ app.get('/api/recover-session', async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     let periodEnd = 0;
 
-
-
-/* 
-W - sub 'price_1SIBPkFF2HALdyFkogiGJG5w' 
-W single price_1SYeXVFF2HALdyFkMR0pVo2u
-
-
-M sub  - price_1SIBCzFF2HALdyFk7vOxByGq
-M single -  price_1SYeY3FF2HALdyFk8znKF3un
-
-Y sub price_1SXOVuFF2HALdyFk95SThAcM
-Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
-
-*/
-
-
     if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Weekly
       periodEnd = now + 7 * 86400;
-    } else if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Monthly
+    } else if (priceId === 'price_1SIBCzFF2HALdyFk7vOxByGq') { // Monthly
       periodEnd = now + 30 * 86400;
-    } else if (priceId === 'price_1SIBPkFF2HALdyFkogiGJG5w') { // Yearly
+    } else if (priceId === 'price_1SXOVuFF2HALdyFk95SThAcM') { // Yearly
       periodEnd = now + 365 * 86400;
     } else {
       console.log('%cRECOVER FAILED → Unknown priceId', 'color:red', priceId);
       return res.status(400).json({ error: 'Unknown product' });
     }
 
-    console.log('%cSUB DETAILS → Period End UNIX:', 'color:cyan', periodEnd, 'Date:', new Date(periodEnd * 1000));
+    console.log('%cACCESS DETAILS → Period End UNIX:', 'color:cyan', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     await pool.query(
       'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
       [periodEnd, userId]
     );
 
-    console.log('%cSUB ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
+    console.log('%cACCESS ACTIVATED → User ID:', 'color:lime', userId, 'End UNIX:', periodEnd, 'Date:', new Date(periodEnd * 1000));
 
     const token = generateToken(userId);
     console.log('%cRECOVER SUCCESS → Token generated for User ID:', 'color:lime', userId);
@@ -381,30 +290,13 @@ Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
   }
 });
 
-// CANCEL SUBSCRIPTION — FIXED METHOD WITH STRIPE SYNC
+// CANCEL ACCESS — RESET DB (KEEP FOR MANUAL RESET)
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   console.log('%cCANCEL REQUEST → User ID:', 'color:orange', req.userId);
 
   try {
-    const [[user]] = await pool.query('SELECT stripe_subscription_id FROM users WHERE id = ?',['req.userId']);
-    if (!user.stripe_subscription_id) {
-      console.log('%cCANCEL FAILED → No subscription in DB', 'color:red');
-      return res.status(400).json({ error: 'No subscription' });
-    }
-
-    try {
-      await stripe.subscriptions.cancel(user.stripe_subscription_id);
-    } catch (stripeErr) {
-      if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.code === 'resource_missing') {
-        console.log('%cSTRIPE SUB MISSING → Proceeding with DB update for User ID:', 'color:yellow', req.userId);
-      } else {
-        console.error('Cancel Stripe error:', stripeErr);
-        return res.status(500).json({ error: 'Cancel failed' });
-      }
-    }
-
     await pool.query(
-      'UPDATE users SET subscription_status = "inactive", stripe_subscription_id = NULL, subscription_period_end = 0 WHERE id = ?',
+      'UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?',
       [req.userId]
     );
 
@@ -426,9 +318,6 @@ app.listen(PORT, () => {
   console.log('BACKEND IS LIVE — WITH DEBUG LOGS');
   console.log(`Listening on port ${PORT}`);
 });
-
-
-
 /* 
 W - sub 'price_1SIBPkFF2HALdyFkogiGJG5w' 
 W single price_1SYeXVFF2HALdyFkMR0pVo2u
