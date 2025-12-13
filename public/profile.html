@@ -9,17 +9,14 @@
 </head>
 <body>
 
-
   <nav>
     <a href="index.html">Home</a> |
     <a href="signup.html">Sign Up</a> |
     <a href="login.html">Login</a> |
     <a href="profile.html">Profile</a> |
-
-    <a href='subscriptions/premium.html'>Premium</a>
+    <!-- NOW JUST A REGULAR LINK! Cookie handles auth automatically -->
+    <a href="https://authappmain.onrender.com/subscriptions/premium.html">Premium</a>
   </nav>
-
-  
 
   <div class="container">
     <h2>My Profile</h2>
@@ -34,34 +31,26 @@ async function getHeaders() {
   return token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
 
-async function loadProfile(reloadAfterRecover = true) {
+async function loadProfile(reloadAfterRecover = false) {
   console.log('LOAD PROFILE START' + (reloadAfterRecover ? ' (post-recover reload)' : ''));
-  const url = new URL(location.href); // Use location.href for absolute
-  console.log('Current full URL:', location.href);
-  const queryString = location.search;
-  console.log('Query string:', queryString);
-  const params = new URLSearchParams(queryString);
-  console.log('Params entries:', Array.from(params.entries()));
-  console.log('Params has session_id:', params.has('session_id'));
+  
+  const params = new URLSearchParams(window.location.search);
   const sessionId = params.get('session_id');
-  console.log('Extracted sessionId:', sessionId || 'none');
 
   let recovered = false;
   if (sessionId) {
     console.log('Recovering session from Stripe:', sessionId);
     try {
       const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`, {
+        method: 'GET',
+        credentials: 'include', // IMPORTANT: Send cookies
         headers: await getHeaders()
       });
-      console.log('Recover response status:', recoverRes.status);
+      
       if (recoverRes.ok) {
         const data = await recoverRes.json();
-        console.log('Recover data:', data);
-        if (data.token) localStorage.setItem('token', data.token);
+        if (data.token) localStorage.setItem('token', data.token); // Backup in localStorage
         recovered = true;
-      } else {
-        const errorText = await recoverRes.text();
-        console.log('Recover failed with status:', recoverRes.status, 'Error:', errorText);
       }
       history.replaceState(null, '', 'profile.html');
     } catch (e) {
@@ -69,19 +58,18 @@ async function loadProfile(reloadAfterRecover = true) {
     }
   }
 
-  // If just recovered successfully, reload the function to re-fetch /api/me and re-render
   if (recovered && !reloadAfterRecover) {
-    console.log('Recover success - reloading profile to update UI');
-    return loadProfile(true); // Recursive call with flag to avoid infinite loop
+    return loadProfile(true);
   }
 
   try {
-    console.log('Fetching /api/me');
-    const res = await fetch(`${BACKEND}/api/me`, { headers: await getHeaders() });
-    console.log('/api/me status:', res.status);
+    const res = await fetch(`${BACKEND}/api/me`, { 
+      credentials: 'include', // IMPORTANT: Send cookies
+      headers: await getHeaders() 
+    });
+    
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
-    console.log('User data received:', u);
 
     document.getElementById('content').innerHTML = `
       <h3>Welcome, <strong>${u.username}</strong>!</h3>
@@ -98,11 +86,9 @@ async function loadProfile(reloadAfterRecover = true) {
         <button onclick="buy('price_1SYeXVFF2HALdyFkMR0pVo2u')" style="background:#1565c0;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
           Weekly $2.95
         </button>
-
         <button onclick="buy('price_1SYeY3FF2HALdyFk8znKF3un')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
           Monthly $7.75
         </button>
-
         <button onclick="buy('price_1SYeZVFF2HALdyFkxBfvFuTJ')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
           Yearly $75.00
         </button>
@@ -111,42 +97,35 @@ async function loadProfile(reloadAfterRecover = true) {
       <p><button onclick="logout()" style="margin-top:20px;padding:10px 20px;background:#555;color:white;border:none;border-radius:4px;">Logout</button></p>
     `;
 
-    console.log('Rendered subscription status:', u.subscription_active ? 'ACTIVE' : 'INACTIVE', 'with days left:', u.days_left);
-
     if (sessionId && recovered) {
       document.getElementById('content').insertAdjacentHTML('afterbegin',
         '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;font-weight:bold;">Thank you! Your access is now ACTIVE!</div>'
       );
-      console.log('Success message shown after redirect');
     }
 
   } catch (err) {
     console.error('Load profile error:', err);
     document.getElementById('content').innerHTML = 'Not logged in → <a href="login.html">Login</a>';
   }
-  console.log('LOAD PROFILE END');
 }
 
 async function buy(id) {
-  console.log('Buy start, price ID:', id);
   fetch(`${BACKEND}/api/create-checkout-session`, {
     method: 'POST',
+    credentials: 'include', // Send cookies
     headers: await getHeaders(),
     body: JSON.stringify({ price_id: id })
   })
   .then(r => r.json())
-  .then(d => {
-    console.log('Checkout URL:', d.url);
-    location.href = d.url;
-  })
+  .then(d => location.href = d.url)
   .catch(e => console.error('Buy error:', e));
 }
 
 async function cancelSub() {
-  console.log('Cancel start');
   if (confirm('Cancel your access immediately?\n\nYou will lose access now.')) {
     fetch(`${BACKEND}/api/cancel-subscription-now`, {
       method: 'POST',
+      credentials: 'include', // Send cookies
       headers: await getHeaders()
     })
       .then(() => { alert('Cancelled.'); loadProfile(); })
@@ -154,8 +133,14 @@ async function cancelSub() {
   }
 }
 
-function logout() {
-  console.log('Logout start');
+async function logout() {
+  // Call API to clear server-side cookie
+  await fetch(`${BACKEND}/api/logout`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  
+  // Clear localStorage backup
   localStorage.removeItem('token');
   location.href = 'login.html';
 }
