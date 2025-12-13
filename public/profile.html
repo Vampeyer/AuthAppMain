@@ -8,11 +8,18 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+
+
   <nav>
     <a href="index.html">Home</a> |
+    <a href="signup.html">Sign Up</a> |
+    <a href="login.html">Login</a> |
     <a href="profile.html">Profile</a> |
-    <a href="#" onclick="logout(); return false;">Logout</a>
+
+    <a href='subscriptions/premium.html'>Premium</a>
   </nav>
+
+  
 
   <div class="container">
     <h2>My Profile</h2>
@@ -27,7 +34,7 @@ async function getHeaders() {
   return token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
 
-async function loadProfile(reloadAfterRecover = false) {
+async function loadProfile(reloadAfterRecover = true) {
   console.log('LOAD PROFILE START' + (reloadAfterRecover ? ' (post-recover reload)' : ''));
   const url = new URL(location.href); // Use location.href for absolute
   console.log('Current full URL:', location.href);
