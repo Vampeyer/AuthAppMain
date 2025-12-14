@@ -43,12 +43,13 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // ADDED: For form data
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ==================== JWT ====================
 const JWT_SECRET = process.env.JWT_SECRET;
-const TOKEN_EXPIRY = '20m'; // 7 days
-const COOKIE_MAX_AGE = 20 * 60 * 1000; // 20min in milliseconds
+const TOKEN_EXPIRY = '20m'; // 20 minutes
+const COOKIE_MAX_AGE = 20 * 60 * 1000; // 20 minutes in milliseconds
 
 const generateToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
 
@@ -60,21 +61,29 @@ const verifyToken = (token) => {
 // ==================== HYBRID AUTH MIDDLEWARE ====================
 // Checks BOTH cookies AND Authorization headers
 const requireAuth = (req, res, next) => {
+  console.log('🔐 AUTH CHECK for path:', req.path);
+  console.log('   Cookies present?:', req.cookies ? 'YES' : 'NO');
+  if (req.cookies) {
+    console.log('   Cookie keys:', Object.keys(req.cookies));
+    console.log('   auth_token cookie:', req.cookies.auth_token ? 'PRESENT' : 'MISSING');
+  }
+  console.log('   Authorization header?:', req.headers.authorization ? 'YES' : 'NO');
+  
   let token = null;
   
   // Try to get token from httpOnly cookie first (preferred)
   if (req.cookies && req.cookies.auth_token) {
     token = req.cookies.auth_token;
-    console.log('✅ Token found in cookie');
+    console.log('   ✅ Token found in cookie');
   }
   // Fallback to Authorization header (for API calls)
   else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
     token = req.headers.authorization.split(' ')[1];
-    console.log('✅ Token found in Authorization header');
+    console.log('   ✅ Token found in Authorization header');
   }
 
   if (!token) {
-    console.log('❌ AUTH FAILED → No token for path:', req.path);
+    console.log('   ❌ AUTH FAILED → No token for path:', req.path);
     if (req.accepts('html')) {
       return res.status(401).send(`
         <h1>Login Required</h1>
@@ -87,7 +96,7 @@ const requireAuth = (req, res, next) => {
 
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('❌ AUTH FAILED → Invalid token for path:', req.path);
+    console.log('   ❌ AUTH FAILED → Invalid token for path:', req.path);
     if (req.accepts('html')) {
       return res.status(401).send(`
         <h1>Session Expired</h1>
@@ -99,21 +108,23 @@ const requireAuth = (req, res, next) => {
   }
 
   req.userId = payload.userId;
-  console.log('✅ AUTH SUCCESS → User ID:', req.userId, 'for path:', req.path);
+  console.log('   ✅ AUTH SUCCESS → User ID:', req.userId, 'for path:', req.path);
   next();
 };
 
 // ==================== HELPER: SET AUTH COOKIE ====================
 const setAuthCookie = (res, token) => {
+  // For Render.com backend, we need to set cookie for the render.com domain
+  // NOT for techsport.app since that's a different domain
   res.cookie('auth_token', token, {
     httpOnly: true,        // Cannot be accessed by JavaScript (XSS protection)
     secure: true,          // Only sent over HTTPS
     sameSite: 'none',      // Required for cross-origin (your setup)
     maxAge: COOKIE_MAX_AGE,
-    domain: '.techsport.app', // Share cookie across subdomains
+    // Remove domain restriction - let it default to current domain (render.com)
     path: '/'
   });
-  console.log('🍪 Auth cookie set');
+  console.log('🍪 Auth cookie set for current domain (onrender.com)');
 };
 
 // ==================== PROTECTED SUBSCRIPTIONS FOLDER ====================
@@ -358,11 +369,78 @@ app.post('/api/logout', (req, res) => {
     httpOnly: true,
     secure: true,
     sameSite: 'none',
-    domain: '.techsport.app',
     path: '/'
   });
   console.log('🚪 User logged out, cookie cleared');
   res.json({ success: true });
+});
+
+// ====================
+// ACCESS PREMIUM PAGE - SPECIAL ROUTE
+// This is the KEY fix for cross-origin premium access!
+// ====================
+app.post('/api/access-premium', async (req, res) => {
+  const { token } = req.body;
+  
+  console.log('🔑 ACCESS PREMIUM REQUEST RECEIVED');
+  console.log('   Token provided:', token ? 'YES' : 'NO');
+  console.log('   Request body:', req.body);
+  
+  if (!token) {
+    console.log('❌ No token provided in request body');
+    return res.status(401).send(`
+      <h1>Login Required</h1>
+      <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a> first.</p>
+    `);
+  }
+
+  const payload = verifyToken(token);
+  if (!payload) {
+    console.log('❌ Invalid token - verification failed');
+    return res.status(401).send(`
+      <h1>Session Expired</h1>
+      <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login again</a>.</p>
+    `);
+  }
+
+  console.log('✅ Token verified - User ID:', payload.userId);
+
+  try {
+    const [[user]] = await pool.query(
+      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
+      [payload.userId]
+    );
+    
+    console.log('   User subscription_status:', user.subscription_status);
+    console.log('   User subscription_period_end:', user.subscription_period_end);
+    
+    const now = Math.floor(Date.now() / 1000);
+    console.log('   Current time (UNIX):', now);
+    console.log('   Subscription active?:', user.subscription_status === 'active' && user.subscription_period_end > now);
+    
+    if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
+      console.log('❌ No active subscription - access denied');
+      return res.status(403).send(`
+        <h1>Subscription Required</h1>
+        <p>You need an active subscription to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
+      `);
+    }
+
+    // Set the cookie so subsequent requests on this domain work
+    console.log('🍪 Setting auth cookie...');
+    setAuthCookie(res, token);
+    
+    console.log('✅ Access granted! Redirecting to /subscriptions/premium.html');
+    console.log('   Cookie should now be set for domain: .techsport.app');
+    
+    // Redirect to the premium page
+    // The cookie we just set will be included in this request
+    res.redirect('/subscriptions/premium.html');
+    
+  } catch (err) {
+    console.error('❌ Access premium error:', err);
+    res.status(500).send('<h1>Server Error</h1><p>Please try again later.</p>');
+  }
 });
 
 // STATIC FILES
@@ -377,14 +455,15 @@ app.listen(PORT, () => {
 });
 
 /* 
+PRICE IDS:
 W single price_1SYeXVFF2HALdyFkMR0pVo2u
 M single - price_1SYeY3FF2HALdyFk8znKF3un
 Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
 */
 
-
 /* 
+PRICE IDS:
 W single price_1SYeXVFF2HALdyFkMR0pVo2u
-M single -  price_1SYeY3FF2HALdyFk8znKF3un
+M single - price_1SYeY3FF2HALdyFk8znKF3un
 Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
 */

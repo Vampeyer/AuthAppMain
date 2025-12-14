@@ -2,47 +2,131 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Premium Content</title>
+  <title>Premium Content (Client-Side)</title>
   <base href="/streampaltest/public/">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
-    <nav>
+  <nav>
     <a href="index.html">Home</a> |
     <a href="signup.html">Sign Up</a> |
     <a href="login.html">Login</a> |
     <a href="profile.html">Profile</a> |
-
-<!-- Just a regular link! Cookie sent automatically -->
-<a href="https://authappmain.onrender.com/subscriptions/premium.html">Premium</a>
+    <a href="premium2.html">Premium</a>
   </nav>
 
+  <!-- Loading state (shown while checking access) -->
+  <div class="container" id="loading" style="text-align:center;padding:40px;">
+    <h2>🔒 Verifying access...</h2>
+    <p>Please wait while we check your subscription...</p>
+  </div>
 
-  <div class="container" id="premium" style="display:none">
-    <h1>PREMIUM UNLOCKED</h1>
-    <p>Congratulations! You have full access.</p>
+  <!-- Premium content (hidden until verified) -->
+  <div class="container" id="premium" style="display:none;">
+    <h1 style="color:#2e7d32;">✅ PREMIUM UNLOCKED</h1>
+    <p>Congratulations! You have full access to premium content.</p>
+    <hr>
+    <h2>Your Exclusive Content</h2>
+    <p>This is where your premium content goes. Add videos, articles, downloads, etc.</p>
+    
+    <div style="background:#f0f0f0;padding:20px;margin-top:20px;border-radius:8px;">
+      <h3>🎬 Exclusive Video Library</h3>
+      <p>Access all premium streams and recordings here...</p>
+      <ul>
+        <li>Premium Stream #1</li>
+        <li>Premium Stream #2</li>
+        <li>Premium Stream #3</li>
+      </ul>
+    </div>
+
+    <div style="background:#e3f2fd;padding:20px;margin-top:20px;border-radius:8px;">
+      <h3>📚 Premium Articles</h3>
+      <p>Read exclusive articles only available to subscribers...</p>
+    </div>
+
+    <div style="background:#f3e5f5;padding:20px;margin-top:20px;border-radius:8px;">
+      <h3>💾 Downloads</h3>
+      <p>Download premium resources and materials...</p>
+    </div>
   </div>
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
 
+// Helper function to get auth headers
 async function getHeaders() {
   const token = localStorage.getItem('token');
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
-fetch(`${BACKEND_URL}/api/me`, { headers: await getHeaders() })
-  .then(r => r.ok ? r.json() : Promise.reject())
-  .then(u => {
-    if (u.subscription_active) {
-      document.getElementById('premium').style.display = 'block';
-    } else {
-      alert('Subscription required');
-      location.href = 'profile.html';
+// ====================
+// CHECK SUBSCRIPTION ACCESS
+// This is CLIENT-SIDE protection - checks via API call
+// ====================
+async function checkAccess() {
+  console.log('🔍 Checking subscription access...');
+  
+  const token = localStorage.getItem('token');
+  
+  // First check: Do they have a token?
+  if (!token) {
+    console.log('❌ No token found');
+    alert('Please log in first');
+    window.location.href = 'login.html';
+    return;
+  }
+
+  try {
+    // Call the /api/me endpoint to check subscription status
+    const response = await fetch(`${BACKEND_URL}/api/me`, { 
+      method: 'GET',
+      credentials: 'include', // Send cookies if available
+      headers: await getHeaders()
+    });
+
+    console.log('API Response status:', response.status);
+
+    // Handle authentication errors
+    if (!response.ok) {
+      if (response.status === 401) {
+        console.log('❌ Authentication failed');
+        alert('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        window.location.href = 'login.html';
+      } else {
+        throw new Error('Failed to verify access');
+      }
+      return;
     }
-  })
-  .catch(() => location.href = 'login.html');
+
+    // Parse the user data
+    const user = await response.json();
+    console.log('User data received:', user);
+
+    // Check if subscription is active
+    if (user.subscription_active) {
+      // ✅ ACCESS GRANTED!
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('premium').style.display = 'block';
+      console.log('✅ Access granted - subscription is active');
+      console.log(`   Days left: ${user.days_left}`);
+    } else {
+      // ❌ NO SUBSCRIPTION
+      console.log('❌ No active subscription');
+      alert('Must have subscription to access this content');
+      window.location.href = 'profile.html';
+    }
+
+  } catch (error) {
+    console.error('Error checking access:', error);
+    alert('Error verifying access. Please try again.');
+    window.location.href = 'login.html';
+  }
+}
+
+// Run the access check when the page loads
+checkAccess();
 </script>
 </body>
 </html>

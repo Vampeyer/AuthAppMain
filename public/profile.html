@@ -14,8 +14,8 @@
     <a href="signup.html">Sign Up</a> |
     <a href="login.html">Login</a> |
     <a href="profile.html">Profile</a> |
-    <!-- NOW JUST A REGULAR LINK! Cookie handles auth automatically -->
-    <a href="https://authappmain.onrender.com/subscriptions/premium.html">Premium</a>
+    <a href="#" onclick="openPremiumBackend(); return false;">Premium (Server)</a> |
+    <a href="premium2.html">Premium (Client)</a>
   </nav>
 
   <div class="container">
@@ -31,6 +31,9 @@ async function getHeaders() {
   return token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
 
+// ====================
+// LOAD PROFILE
+// ====================
 async function loadProfile(reloadAfterRecover = false) {
   console.log('LOAD PROFILE START' + (reloadAfterRecover ? ' (post-recover reload)' : ''));
   
@@ -109,6 +112,9 @@ async function loadProfile(reloadAfterRecover = false) {
   }
 }
 
+// ====================
+// BUY SUBSCRIPTION
+// ====================
 async function buy(id) {
   fetch(`${BACKEND}/api/create-checkout-session`, {
     method: 'POST',
@@ -121,6 +127,9 @@ async function buy(id) {
   .catch(e => console.error('Buy error:', e));
 }
 
+// ====================
+// CANCEL SUBSCRIPTION
+// ====================
 async function cancelSub() {
   if (confirm('Cancel your access immediately?\n\nYou will lose access now.')) {
     fetch(`${BACKEND}/api/cancel-subscription-now`, {
@@ -133,6 +142,9 @@ async function cancelSub() {
   }
 }
 
+// ====================
+// LOGOUT
+// ====================
 async function logout() {
   // Call API to clear server-side cookie
   await fetch(`${BACKEND}/api/logout`, {
@@ -145,6 +157,70 @@ async function logout() {
   location.href = 'login.html';
 }
 
+// ====================
+// OPEN BACKEND PREMIUM PAGE
+// This is the KEY function for accessing server-side protected content!
+// ====================
+async function openPremiumBackend() {
+  console.log('🔐 Opening backend premium page...');
+  
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Please log in first');
+    window.location.href = 'login.html';
+    return;
+  }
+
+  try {
+    // First, check if user has active subscription via API
+    const response = await fetch(`${BACKEND}/api/me`, { 
+      credentials: 'include',
+      headers: await getHeaders() 
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        alert('Session expired. Please log in again.');
+        localStorage.removeItem('token');
+        window.location.href = 'login.html';
+      }
+      return;
+    }
+
+    const user = await response.json();
+
+    if (!user.subscription_active) {
+      alert('Must have subscription to access this content');
+      return;
+    }
+
+    // User has active subscription!
+    // Create a hidden form to POST the token to the server
+    // The server will verify it and set a cookie, then redirect to premium page
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `${BACKEND}/api/access-premium`;
+    form.target = '_blank'; // Open in new tab
+    
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'token';
+    input.value = token;
+    
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+
+    console.log('✅ Form submitted to access premium content');
+
+  } catch (error) {
+    console.error('Error:', error);
+    alert('Error accessing premium content');
+  }
+}
+
+// Start loading profile when page loads
 loadProfile();
 </script>
 </body>
