@@ -1,0 +1,377 @@
+================================================================================
+SUBSINGLE.TXT - MIGRATION GUIDE
+Single Payment vs Subscription Payment Systems
+================================================================================
+
+📋 TABLE OF CONTENTS
+1. Overview of Both Systems
+2. Key Differences
+3. Migration: Single → Subscription
+4. Migration: Subscription → Single
+5. Price ID Reference
+6. Testing Checklist
+
+================================================================================
+1. OVERVIEW OF BOTH SYSTEMS
+================================================================================
+
+SINGLE PAYMENT SYSTEM:
+- User pays once, gets access for fixed period (7/30/365 days)
+- No recurring charges
+- Access expires automatically after period
+- Stripe mode: 'payment'
+- Period hardcoded in server based on price_id
+
+SUBSCRIPTION SYSTEM:
+- User pays, subscription auto-renews every period
+- Recurring charges until cancelled
+- Access continues as long as subscription active
+- Stripe mode: 'subscription'
+- Period managed by Stripe webhooks
+
+================================================================================
+2. KEY DIFFERENCES - WHAT CHANGES
+================================================================================
+
+┌─────────────────────┬─────────────────────┬─────────────────────┐
+│ Component           │ SINGLE PAYMENT      │ SUBSCRIPTION        │
+├─────────────────────┼─────────────────────┼─────────────────────┤
+│ Stripe Mode         │ 'payment'           │ 'subscription'      │
+│ Price Type          │ One-time prices     │ Recurring prices    │
+│ Access Period       │ Hardcoded in server │ Managed by Stripe   │
+│ Auto-renewal        │ NO                  │ YES                 │
+│ Webhooks Required   │ NO (optional)       │ YES (critical)      │
+│ Cancellation        │ Manual DB reset     │ Cancel subscription │
+│ Period Tracking     │ subscription_period │ subscription_period │
+│                     │ _end (UNIX time)    │ _end (UNIX time)    │
+└─────────────────────┴─────────────────────┴─────────────────────┘
+
+================================================================================
+3. MIGRATION: SINGLE PAYMENT → SUBSCRIPTION
+================================================================================
+
+STEP 1: CREATE NEW STRIPE PRICES
+─────────────────────────────────
+Go to Stripe Dashboard → Products → Create recurring prices
+
+Weekly:  $2.95/week  → Get price_id (e.g., price_1ABC...)
+Monthly: $7.75/month → Get price_id (e.g., price_2DEF...)
+Yearly:  $75.00/year → Get price_id (e.g., price_3GHI...)
+
+STEP 2: UPDATE SERVER.JS - CHECKOUT SESSION
+────────────────────────────────────────────
+CHANGE THIS (Single Payment):
+```javascript
+const session = await stripe.checkout.sessions.create({
+  customer: customerId,
+  payment_method_types: ['card'],
+  line_items: [{ price: price_id, quantity: 1 }],
+  mode: 'payment',  // ← SINGLE PAYMENT MODE
+  success_url: `https://...profile.html?session_id={CHECKOUT_SESSION_ID}`,
+  cancel_url: `https://...profile.html?cancel=true`,
+  metadata: { userId: req.userId.toString(), priceId: price_id }
+});
+```
+
+TO THIS (Subscription):
+```javascript
+const session = await stripe.checkout.sessions.create({
+  customer: customerId,
+  payment_method_types: ['card'],
+  line_items: [{ price: price_id, quantity: 1 }],
+  mode: 'subscription',  // ← SUBSCRIPTION MODE
+  success_url: `https://...profile.html?session_id={CHECKOUT_SESSION_ID}`,
+  cancel_url: `https://...profile.html?cancel=true`,
+  metadata: { userId: req.userId.toString() }
+  // Note: Remove priceId from metadata (not needed)
+});
+```
+
+STEP 3: UPDATE SERVER.JS - RECOVER SESSION
+───────────────────────────────────────────
+REMOVE THIS (Hardcoded period logic):
+```javascript
+const priceId = session.metadata?.priceId;
+const now = Math.floor(Date.now() / 1000);
+let periodEnd = 0;
+
+if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') {
+  periodEnd = now + 7 * 86400; // Weekly
+} else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') {
+  periodEnd = now + 30 * 86400; // Monthly
+} else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') {
+  periodEnd = now + 365 * 86400; // Yearly
+} else {
+  return res.status(400).json({ error: 'Unknown product' });
+}
+```
+
+ADD THIS (Get period from Stripe subscription):
+```javascript
+// Retrieve the subscription object from Stripe
+const subscription = await stripe.subscriptions.retrieve(session.subscription);
+const periodEnd = subscription.current_period_end; // Already a UNIX timestamp!
+
+console.log('Subscription period end:', periodEnd, new Date(periodEnd * 1000));
+```
+
+STEP 4: ADD WEBHOOK ENDPOINT
+─────────────────────────────
+ADD THIS to server.js (BEFORE express.json() middleware):
+```javascript
+// Stripe webhook - must be BEFORE express.json()
+app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err) {
+    console.log('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle different event types
+  switch (event.type) {
+    case 'checkout.session.completed':
+      // Initial subscription created
+      const session = event.data.object;
+      if (session.mode === 'subscription') {
+        const userId = session.metadata.userId;
+        const subscription = await stripe.subscriptions.retrieve(session.subscription);
+        await pool.query(
+          'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
+          [subscription.current_period_end, userId]
+        );
+        console.log('Subscription activated for user:', userId);
+      }
+      break;
+
+    case 'customer.subscription.updated':
+      // Subscription renewed or modified
+      const sub = event.data.object;
+      const [[user]] = await pool.query(
+        'SELECT id FROM users WHERE stripe_customer_id = ?',
+        [sub.customer]
+      );
+      if (user) {
+        await pool.query(
+          'UPDATE users SET subscription_status = ?, subscription_period_end = ? WHERE id = ?',
+          [sub.status, sub.current_period_end, user.id]
+        );
+        console.log('Subscription updated for user:', user.id);
+      }
+      break;
+
+    case 'customer.subscription.deleted':
+      // Subscription cancelled
+      const cancelledSub = event.data.object;
+      const [[cancelledUser]] = await pool.query(
+        'SELECT id FROM users WHERE stripe_customer_id = ?',
+        [cancelledSub.customer]
+      );
+      if (cancelledUser) {
+        await pool.query(
+          'UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?',
+          [cancelledUser.id]
+        );
+        console.log('Subscription cancelled for user:', cancelledUser.id);
+      }
+      break;
+
+    case 'invoice.payment_failed':
+      // Payment failed - could notify user
+      console.log('Payment failed for subscription:', event.data.object.subscription);
+      break;
+  }
+
+  res.json({received: true});
+});
+```
+
+STEP 5: UPDATE CANCEL ENDPOINT
+───────────────────────────────
+CHANGE THIS (Manual DB reset):
+```javascript
+app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
+  await pool.query(
+    'UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?',
+    [req.userId]
+  );
+  res.json({ success: true });
+});
+```
+
+TO THIS (Cancel Stripe subscription):
+```javascript
+app.post('/api/cancel-subscription', requireAuth, async (req, res) => {
+  try {
+    const [[user]] = await pool.query(
+      'SELECT stripe_customer_id FROM users WHERE id = ?',
+      [req.userId]
+    );
+
+    if (!user.stripe_customer_id) {
+      return res.status(400).json({ error: 'No subscription found' });
+    }
+
+    // Get active subscriptions for this customer
+    const subscriptions = await stripe.subscriptions.list({
+      customer: user.stripe_customer_id,
+      status: 'active',
+      limit: 1
+    });
+
+    if (subscriptions.data.length > 0) {
+      // Cancel the subscription at period end (user keeps access until end of billing period)
+      await stripe.subscriptions.update(subscriptions.data[0].id, {
+        cancel_at_period_end: true
+      });
+      
+      // OR cancel immediately (user loses access now):
+      // await stripe.subscriptions.cancel(subscriptions.data[0].id);
+      
+      console.log('Subscription cancelled for user:', req.userId);
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'No active subscription' });
+    }
+  } catch (err) {
+    console.error('Cancel error:', err);
+    res.status(500).json({ error: 'Cancel failed' });
+  }
+});
+```
+
+STEP 6: UPDATE FRONTEND BUTTON TEXT
+────────────────────────────────────
+In profile.html, change button text to reflect subscription:
+```html
+<button onclick="buy('price_...')">
+  Weekly $2.95/week  <!-- Add "/week" -->
+</button>
+```
+
+STEP 7: CONFIGURE STRIPE WEBHOOK
+─────────────────────────────────
+1. Go to Stripe Dashboard → Developers → Webhooks
+2. Add endpoint: https://authappmain.onrender.com/webhook
+3. Select events:
+   - checkout.session.completed
+   - customer.subscription.updated
+   - customer.subscription.deleted
+   - invoice.payment_failed
+4. Copy webhook signing secret → Add to .env as STRIPE_WEBHOOK_SECRET
+
+================================================================================
+4. MIGRATION: SUBSCRIPTION → SINGLE PAYMENT
+================================================================================
+
+STEP 1: CREATE SINGLE-PAYMENT PRICES
+─────────────────────────────────────
+Go to Stripe Dashboard → Products → Create one-time prices
+
+Weekly:  $2.95 one-time → Get price_id
+Monthly: $7.75 one-time → Get price_id
+Yearly:  $75.00 one-time → Get price_id
+
+STEP 2: UPDATE SERVER.JS - CHECKOUT SESSION
+────────────────────────────────────────────
+Change mode from 'subscription' to 'payment'
+Add priceId back to metadata
+
+STEP 3: UPDATE SERVER.JS - RECOVER SESSION
+───────────────────────────────────────────
+REMOVE subscription retrieval logic
+ADD hardcoded period calculation based on priceId
+
+STEP 4: REMOVE WEBHOOK ENDPOINT
+────────────────────────────────
+Comment out or delete the /webhook route
+
+STEP 5: UPDATE CANCEL ENDPOINT
+───────────────────────────────
+Change from Stripe cancellation to manual DB reset
+
+STEP 6: UPDATE FRONTEND
+────────────────────────
+Remove "/week", "/month", "/year" from button text
+
+================================================================================
+5. PRICE ID REFERENCE
+================================================================================
+
+CURRENT SINGLE PAYMENT PRICE IDs (Your System):
+┌─────────┬──────────────────────────────────┬────────┐
+│ Period  │ Price ID                         │ Cost   │
+├─────────┼──────────────────────────────────┼────────┤
+│ Weekly  │ price_1SYeXVFF2HALdyFkMR0pVo2u   │ $2.95  │
+│ Monthly │ price_1SYeY3FF2HALdyFk8znKF3un   │ $7.75  │
+│ Yearly  │ price_1SYeZVFF2HALdyFkxBfvFuTJ   │ $75.00 │
+└─────────┴──────────────────────────────────┴────────┘
+
+SUBSCRIPTION PRICE IDs (Need to Create):
+Create these in Stripe Dashboard with recurring billing
+
+WHERE TO UPDATE PRICE IDs:
+1. profile.html - In buy() button onclick attributes
+2. server.js - In recover-session priceId comparison (single payment only)
+3. Comments at bottom of server.js
+
+================================================================================
+6. TESTING CHECKLIST
+================================================================================
+
+SINGLE PAYMENT TESTING:
+□ User can purchase weekly access
+□ Access expires after 7 days
+□ User can purchase monthly access
+□ Access expires after 30 days
+□ User can purchase yearly access
+□ Access expires after 365 days
+□ Manual cancel resets access immediately
+□ No charges after initial payment
+
+SUBSCRIPTION TESTING:
+□ User can subscribe weekly
+□ Subscription auto-renews after 7 days
+□ User can subscribe monthly
+□ Subscription auto-renews after 30 days
+□ User can subscribe yearly
+□ Subscription auto-renews after 365 days
+□ Cancel sets cancel_at_period_end
+□ Access continues until period end
+□ Access stops after period end if cancelled
+□ Webhook updates subscription status
+□ Failed payment triggers webhook
+
+BOTH SYSTEMS:
+□ Cannot access premium content without active subscription
+□ Can access premium content with active subscription
+□ Profile shows correct subscription status
+□ Profile shows correct days remaining
+□ Auto-expire works (subscription_period_end check)
+
+================================================================================
+7. COMMON ISSUES & SOLUTIONS
+================================================================================
+
+ISSUE: "Unknown product" error
+SOLUTION: Price IDs don't match. Update price_id variables in profile.html
+
+ISSUE: Subscription doesn't activate after payment
+SOLUTION: Check webhook is configured and receiving events
+
+ISSUE: Access expires immediately after purchase
+SOLUTION: Check subscription_period_end is being set correctly (UNIX timestamp)
+
+ISSUE: Webhook fails with signature verification error
+SOLUTION: Ensure STRIPE_WEBHOOK_SECRET is correct in .env
+
+ISSUE: User charged but no access
+SOLUTION: Check Render logs for webhook processing errors
+
+================================================================================
+END OF GUIDE
+================================================================================

@@ -32,6 +32,42 @@ async function getHeaders() {
 }
 
 // ====================
+// FORMAT TIME REMAINING
+// Shows: "X days Y hours Z minutes" or just "Y hours Z minutes" for short durations
+// ====================
+function formatTimeRemaining(seconds) {
+  if (seconds <= 0) return 'Expired';
+  
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  let parts = [];
+  
+  if (days > 0) {
+    parts.push(`${days} day${days > 1 ? 's' : ''}`);
+  }
+  if (hours > 0) {
+    parts.push(`${hours} hour${hours > 1 ? 's' : ''}`);
+  }
+  if (minutes > 0 || parts.length === 0) {
+    parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
+  }
+  
+  return parts.join(' ');
+}
+
+// ====================
+// GET TIME COLOR (Visual indicator of urgency)
+// ====================
+function getTimeColor(seconds) {
+  if (seconds > 86400) return 'lime';        // > 1 day: green
+  if (seconds > 3600) return 'orange';       // > 1 hour: orange
+  if (seconds > 600) return '#ff6b6b';       // > 10 min: red
+  return '#d32f2f';                          // < 10 min: dark red (urgent!)
+}
+
+// ====================
 // LOAD PROFILE
 // ====================
 async function loadProfile(reloadAfterRecover = false) {
@@ -46,13 +82,13 @@ async function loadProfile(reloadAfterRecover = false) {
     try {
       const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`, {
         method: 'GET',
-        credentials: 'include', // IMPORTANT: Send cookies
+        credentials: 'include',
         headers: await getHeaders()
       });
       
       if (recoverRes.ok) {
         const data = await recoverRes.json();
-        if (data.token) localStorage.setItem('token', data.token); // Backup in localStorage
+        if (data.token) localStorage.setItem('token', data.token);
         recovered = true;
       }
       history.replaceState(null, '', 'profile.html');
@@ -67,34 +103,56 @@ async function loadProfile(reloadAfterRecover = false) {
 
   try {
     const res = await fetch(`${BACKEND}/api/me`, { 
-      credentials: 'include', // IMPORTANT: Send cookies
+      credentials: 'include',
       headers: await getHeaders() 
     });
     
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
 
+    // Calculate seconds remaining
+    const secondsLeft = u.days_left * 86400; // Convert days back to seconds for accuracy
+    const timeDisplay = formatTimeRemaining(secondsLeft);
+    const timeColor = getTimeColor(secondsLeft);
+
     document.getElementById('content').innerHTML = `
       <h3>Welcome, <strong>${u.username}</strong>!</h3>
       <p>Email: ${u.email}</p>
-      <p>Subscription: <strong style="color:${u.subscription_active?'lime':'red'};font-size:1.2em;">
-        ${u.subscription_active ? `ACTIVE (${u.days_left} day${u.days_left>1?'s':''} left)` : 'INACTIVE'}
+      <p>Subscription: <strong style="color:${u.subscription_active?timeColor:'red'};font-size:1.2em;">
+        ${u.subscription_active ? `ACTIVE (${timeDisplay} left)` : 'INACTIVE'}
       </strong></p>
 
       ${u.subscription_active ? `
+        <div style="background:#fff3cd;padding:15px;border-radius:8px;margin:20px 0;">
+          <strong>⏰ Time Remaining:</strong><br>
+          <span style="font-size:2em;color:${timeColor};">${timeDisplay}</span>
+        </div>
         <button onclick="cancelSub()" style="background:#c62828;color:white;padding:16px 32px;border:none;border-radius:8px;font-size:18px;cursor:pointer;">
           Cancel Access
         </button>
       ` : `
-        <button onclick="buy('price_1SYeXVFF2HALdyFkMR0pVo2u')" style="background:#1565c0;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
-          Weekly $2.95
-        </button>
-        <button onclick="buy('price_1SYeY3FF2HALdyFk8znKF3un')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
-          Monthly $7.75
-        </button>
-        <button onclick="buy('price_1SYeZVFF2HALdyFkxBfvFuTJ')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
-          Yearly $75.00
-        </button>
+        <h3>Choose Your Access Duration:</h3>
+        
+        <div style="background:#f0f0f0;padding:20px;border-radius:8px;margin:20px 0;">
+          <h4>⚡ Quick Access</h4>
+          <button onclick="buy('price_1SeMmCFF2HALdyFk4gylCDXx')" style="background:#4ecdc4;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+            5 Minutes - $0.25
+          </button>
+
+        </div>
+
+        <div style="background:#f0f0f0;padding:20px;border-radius:8px;margin:20px 0;">
+          <h4>📅 Extended Access</h4>
+          <button onclick="buy('price_1SYeXVFF2HALdyFkMR0pVo2u')" style="background:#1565c0;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+            Weekly - $2.95
+          </button>
+          <button onclick="buy('price_1SYeY3FF2HALdyFk8znKF3un')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+            Monthly - $7.75
+          </button>
+          <button onclick="buy('price_1SYeZVFF2HALdyFkxBfvFuTJ')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+            Yearly - $75.00
+          </button>
+        </div>
       `}
 
       <p><button onclick="logout()" style="margin-top:20px;padding:10px 20px;background:#555;color:white;border:none;border-radius:4px;">Logout</button></p>
@@ -102,8 +160,17 @@ async function loadProfile(reloadAfterRecover = false) {
 
     if (sessionId && recovered) {
       document.getElementById('content').insertAdjacentHTML('afterbegin',
-        '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;font-weight:bold;">Thank you! Your access is now ACTIVE!</div>'
+        '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;font-weight:bold;">✅ Thank you! Your access is now ACTIVE!</div>'
       );
+    }
+
+    // Auto-refresh if subscription is active and expiring soon
+    if (u.subscription_active && secondsLeft < 600) {
+      console.log('⚠️ Subscription expiring soon - will auto-refresh in 30 seconds');
+      setTimeout(() => {
+        console.log('🔄 Auto-refreshing to check subscription status...');
+        loadProfile();
+      }, 30000); // Refresh every 30 seconds when < 10 minutes left
     }
 
   } catch (err) {
@@ -116,9 +183,10 @@ async function loadProfile(reloadAfterRecover = false) {
 // BUY SUBSCRIPTION
 // ====================
 async function buy(id) {
+  console.log('💳 Purchase initiated:', id);
   fetch(`${BACKEND}/api/create-checkout-session`, {
     method: 'POST',
-    credentials: 'include', // Send cookies
+    credentials: 'include',
     headers: await getHeaders(),
     body: JSON.stringify({ price_id: id })
   })
@@ -134,7 +202,7 @@ async function cancelSub() {
   if (confirm('Cancel your access immediately?\n\nYou will lose access now.')) {
     fetch(`${BACKEND}/api/cancel-subscription-now`, {
       method: 'POST',
-      credentials: 'include', // Send cookies
+      credentials: 'include',
       headers: await getHeaders()
     })
       .then(() => { alert('Cancelled.'); loadProfile(); })
@@ -146,20 +214,17 @@ async function cancelSub() {
 // LOGOUT
 // ====================
 async function logout() {
-  // Call API to clear server-side cookie
   await fetch(`${BACKEND}/api/logout`, {
     method: 'POST',
     credentials: 'include'
   });
   
-  // Clear localStorage backup
   localStorage.removeItem('token');
   location.href = 'login.html';
 }
 
 // ====================
 // OPEN BACKEND PREMIUM PAGE
-// This is the KEY function for accessing server-side protected content!
 // ====================
 async function openPremiumBackend() {
   console.log('🔐 Opening backend premium page...');
@@ -172,7 +237,6 @@ async function openPremiumBackend() {
   }
 
   try {
-    // First, check if user has active subscription via API
     const response = await fetch(`${BACKEND}/api/me`, { 
       credentials: 'include',
       headers: await getHeaders() 
@@ -194,13 +258,10 @@ async function openPremiumBackend() {
       return;
     }
 
-    // User has active subscription!
-    // Create a hidden form to POST the token to the server
-    // The server will verify it and set a cookie, then redirect to premium page
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = `${BACKEND}/api/access-premium`;
-    form.target = '_blank'; // Open in new tab
+    form.target = '_blank';
     
     const input = document.createElement('input');
     input.type = 'hidden';
@@ -220,7 +281,7 @@ async function openPremiumBackend() {
   }
 }
 
-// Start loading profile when page loads
+// Start loading profile
 loadProfile();
 </script>
 </body>

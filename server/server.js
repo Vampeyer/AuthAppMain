@@ -226,33 +226,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 // PROFILE + AUTO-EXPIRE
-app.get('/api/me', requireAuth, async (req, res) => {
-  console.log('👤 PROFILE REQUEST → User ID:', req.userId);
-  try {
-    const [[user]] = await pool.query(
-      'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
-      [req.userId]
-    );
 
-    const now = Math.floor(Date.now() / 1000);
-    let active = user.subscription_status === 'active' && user.subscription_period_end > now;
-
-    if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
-      await pool.query('UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?', [req.userId]);
-      active = false;
-    }
-
-    res.json({
-      username: user.username,
-      email: user.email,
-      subscription_active: active,
-      days_left: active ? Math.ceil((user.subscription_period_end - now) / 86400) : 0
-    });
-  } catch (err) {
-    console.error('Profile error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
 
 // CHECKOUT
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
@@ -289,6 +263,68 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
 });
 
 // RECOVER + ACTIVATE ACCESS — WITH COOKIE
+
+
+
+// ================================================================================
+// STEP 2: REPLACE /api/me WITH THIS VERSION (Accurate Time Display)
+// ================================================================================
+
+app.get('/api/me', requireAuth, async (req, res) => {
+  console.log('👤 PROFILE REQUEST → User ID:', req.userId);
+  try {
+    const [[user]] = await pool.query(
+      'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
+      [req.userId]
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    let active = user.subscription_status === 'active' && user.subscription_period_end > now;
+
+    // Auto-expire if period ended
+    if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
+      await pool.query('UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?', [req.userId]);
+      active = false;
+    }
+
+    // Calculate time remaining in different units
+    const secondsLeft = active ? (user.subscription_period_end - now) : 0;
+    const minutesLeft = Math.ceil(secondsLeft / 60);
+    const hoursLeft = Math.ceil(secondsLeft / 3600);
+    const daysLeft = Math.ceil(secondsLeft / 86400);
+
+    console.log('   Subscription active:', active);
+    console.log('   Time left:', secondsLeft, 'seconds =', minutesLeft, 'minutes =', hoursLeft, 'hours =', daysLeft, 'days');
+
+    res.json({
+      username: user.username,
+      email: user.email,
+      subscription_active: active,
+      seconds_left: secondsLeft,     // For accurate display
+      minutes_left: minutesLeft,     // Minutes
+      hours_left: hoursLeft,         // Hours
+      days_left: daysLeft,           // Days (backward compatibility)
+      period_end: user.subscription_period_end, // Raw timestamp
+      current_time: now              // Server time
+    });
+  } catch (err) {
+    console.error('Profile error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+
+
+
+// ================================================================================
+// EXAMPLE: ADD 1 HOUR SUBSCRIPTION - COMPLETE CODE
+// Copy and paste these sections into your server.js
+// ================================================================================
+
+// ==================== STEP 1: UPDATE /api/recover-session ====================
+// Find this section in your server.js and ADD the new price condition
+
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('🔄 RECOVER SESSION START → Session ID:', session_id);
@@ -300,7 +336,7 @@ app.get('/api/recover-session', async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('📦 SESSION RETRIEVED → Status:', session.payment_status);
+    console.log('📦 SESSION RETRIEVED → Status:', session.payment_status, 'Mode:', session.mode);
 
     const userId = session.metadata?.userId;
     if (!userId) {
@@ -317,16 +353,53 @@ app.get('/api/recover-session', async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     let periodEnd = 0;
 
+    // EXISTING PRICES
     if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') {
-      periodEnd = now + 7 * 86400; // Weekly
-    } else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') {
-      periodEnd = now + 30 * 86400; // Monthly
-    } else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') {
-      periodEnd = now + 365 * 86400; // Yearly
-    } else {
-      console.log('❌ RECOVER FAILED → Unknown priceId', priceId);
+      periodEnd = now + 7 * 86400; // Weekly (7 days = 604,800 seconds)
+      console.log('⏰ WEEKLY access granted → 7 days');
+    } 
+    else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') {
+      periodEnd = now + 30 * 86400; // Monthly (30 days = 2,592,000 seconds)
+      console.log('⏰ MONTHLY access granted → 30 days');
+    } 
+    else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') {
+      periodEnd = now + 365 * 86400; // Yearly (365 days = 31,536,000 seconds)
+      console.log('⏰ YEARLY access granted → 365 days');
+    }
+    
+    // ========================================
+    // ADD YOUR NEW PRICES HERE:
+    // ========================================
+    
+    // 5 MINUTES ACCESS
+    else if (priceId === 'price_1SeMmCFF2HALdyFk4gylCDXx') {
+      periodEnd = now + 5 * 60; // 5 minutes = 300 seconds
+      console.log('⏰ 5 MINUTE access granted');
+    }
+    
+    // // 1 HOUR ACCESS
+    // else if (priceId === 'price_YOUR_1HOUR_PRICE_ID_HERE') {
+    //   periodEnd = now + 60 * 60; // 1 hour = 3,600 seconds
+    //   console.log('⏰ 1 HOUR access granted');
+    // }
+    
+    // // 3 HOURS ACCESS
+    // else if (priceId === 'price_YOUR_3HOUR_PRICE_ID_HERE') {
+    //   periodEnd = now + 3 * 60 * 60; // 3 hours = 10,800 seconds
+    //   console.log('⏰ 3 HOURS access granted');
+    // }
+
+    
+    // ========================================
+    // END OF NEW PRICES
+    // ========================================
+    
+    else {
+      console.log('❌ RECOVER FAILED → Unknown priceId:', priceId);
       return res.status(400).json({ error: 'Unknown product' });
     }
+
+    console.log('📅 Period End:', periodEnd, '→', new Date(periodEnd * 1000));
 
     await pool.query(
       'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
@@ -336,14 +409,88 @@ app.get('/api/recover-session', async (req, res) => {
     console.log('✅ ACCESS ACTIVATED → User ID:', userId);
 
     const token = generateToken(userId);
-    setAuthCookie(res, token); // Set/refresh the cookie
-    console.log('✅ RECOVER SUCCESS → Token & Cookie set');
+    setAuthCookie(res, token);
     res.json({ success: true, token });
   } catch (err) {
     console.error('Recover error:', err);
     res.status(500).json({ error: 'Failed' });
   }
 });
+
+
+
+// ================================================================================
+// STEP 3: UPDATE PRICE IDs AT BOTTOM OF FILE (For Reference)
+// ================================================================================
+
+/* 
+SUBSCRIPTION PRICE IDs:
+
+⚡ QUICK ACCESS:
+5min   - $0.25  → price_YOUR_5MIN_PRICE_ID_HERE
+1hr    - $0.99  → price_YOUR_1HOUR_PRICE_ID_HERE
+3hr    - $1.99  → price_YOUR_3HOUR_PRICE_ID_HERE
+12hr   - $4.99  → price_YOUR_12HOUR_PRICE_ID_HERE
+24hr   - $7.99  → price_YOUR_24HOUR_PRICE_ID_HERE
+
+📅 EXTENDED ACCESS:
+Weekly  - $2.95  → price_1SYeXVFF2HALdyFkMR0pVo2u
+Monthly - $7.75  → price_1SYeY3FF2HALdyFk8znKF3un
+Yearly  - $75.00 → price_1SYeZVFF2HALdyFkxBfvFuTJ
+*/
+
+
+// ================================================================================
+// QUICK REFERENCE: TIME CALCULATIONS
+// ================================================================================
+
+/*
+COMMON DURATION CALCULATIONS:
+
+Minutes:
+5 min   = 5 * 60           = 300
+10 min  = 10 * 60          = 600
+15 min  = 15 * 60          = 900
+30 min  = 30 * 60          = 1,800
+
+Hours:
+1 hr    = 60 * 60          = 3,600
+2 hr    = 2 * 60 * 60      = 7,200
+3 hr    = 3 * 60 * 60      = 10,800
+6 hr    = 6 * 60 * 60      = 21,600
+12 hr   = 12 * 60 * 60     = 43,200
+24 hr   = 24 * 60 * 60     = 86,400
+
+Days:
+1 day   = 24 * 60 * 60     = 86,400
+7 days  = 7 * 24 * 60 * 60 = 604,800
+30 days = 30 * 24 * 60 * 60 = 2,592,000
+
+Formula:
+periodEnd = now + (duration_in_seconds)
+*/
+
+
+// ================================================================================
+// TESTING YOUR NEW DURATIONS
+// ================================================================================
+
+/*
+For testing, temporarily change to very short durations:
+
+// Test 1 minute instead of 1 hour
+periodEnd = now + 60; // 1 minute
+
+// Test 5 seconds instead of 5 minutes
+periodEnd = now + 5; // 5 seconds
+
+This way you can see the expiration happen quickly without waiting!
+
+Remember to change back to real durations before production deployment.
+*/
+
+
+
 
 // CANCEL ACCESS
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
