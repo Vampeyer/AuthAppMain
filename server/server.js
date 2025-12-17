@@ -9,7 +9,7 @@ const express = require('express');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const cookieParser = require('cookie-parser'); // npm install cookie-parser
+const cookieParser = require('cookie-parser');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { generateMnemonic } = require('bip39');
 const pool = require('./db');
@@ -20,7 +20,7 @@ const app = express();
 // ==================== COOKIE PARSER ====================
 app.use(cookieParser());
 
-// ==================== CORS (UPDATED FOR COOKIES) ====================
+// ==================== CORS ====================
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const allowedOrigins = [
@@ -34,7 +34,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
 
-  res.setHeader('Access-Control-Allow-Credentials', 'true'); // CRITICAL for cookies
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
@@ -43,13 +43,13 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true })); // ADDED: For form data
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ==================== JWT ====================
 const JWT_SECRET = process.env.JWT_SECRET;
-const TOKEN_EXPIRY = '20m'; // 20 minutes
-const COOKIE_MAX_AGE = 20 * 60 * 1000; // 20 minutes in milliseconds
+const TOKEN_EXPIRY = '20m';
+const COOKIE_MAX_AGE = 20 * 60 * 1000;
 
 const generateToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
 
@@ -59,31 +59,22 @@ const verifyToken = (token) => {
 };
 
 // ==================== HYBRID AUTH MIDDLEWARE ====================
-// Checks BOTH cookies AND Authorization headers
 const requireAuth = (req, res, next) => {
   console.log('🔐 AUTH CHECK for path:', req.path);
-  console.log('   Cookies present?:', req.cookies ? 'YES' : 'NO');
-  if (req.cookies) {
-    console.log('   Cookie keys:', Object.keys(req.cookies));
-    console.log('   auth_token cookie:', req.cookies.auth_token ? 'PRESENT' : 'MISSING');
-  }
-  console.log('   Authorization header?:', req.headers.authorization ? 'YES' : 'NO');
-  
+
   let token = null;
-  
-  // Try to get token from httpOnly cookie first (preferred)
+
   if (req.cookies && req.cookies.auth_token) {
     token = req.cookies.auth_token;
-    console.log('   ✅ Token found in cookie');
+    console.log('   ✅ Token from cookie');
   }
-  // Fallback to Authorization header (for API calls)
   else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
     token = req.headers.authorization.split(' ')[1];
-    console.log('   ✅ Token found in Authorization header');
+    console.log('   ✅ Token from header');
   }
 
   if (!token) {
-    console.log('   ❌ AUTH FAILED → No token for path:', req.path);
+    console.log('   ❌ No token');
     if (req.accepts('html')) {
       return res.status(401).send(`
         <h1>Login Required</h1>
@@ -96,7 +87,7 @@ const requireAuth = (req, res, next) => {
 
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('   ❌ AUTH FAILED → Invalid token for path:', req.path);
+    console.log('   ❌ Invalid token');
     if (req.accepts('html')) {
       return res.status(401).send(`
         <h1>Session Expired</h1>
@@ -108,23 +99,20 @@ const requireAuth = (req, res, next) => {
   }
 
   req.userId = payload.userId;
-  console.log('   ✅ AUTH SUCCESS → User ID:', req.userId, 'for path:', req.path);
+  console.log('   ✅ AUTH SUCCESS → User ID:', req.userId);
   next();
 };
 
-// ==================== HELPER: SET AUTH COOKIE ====================
+// ==================== SET AUTH COOKIE ====================
 const setAuthCookie = (res, token) => {
-  // For Render.com backend, we need to set cookie for the render.com domain
-  // NOT for techsport.app since that's a different domain
   res.cookie('auth_token', token, {
-    httpOnly: true,        // Cannot be accessed by JavaScript (XSS protection)
-    secure: true,          // Only sent over HTTPS
-    sameSite: 'none',      // Required for cross-origin (your setup)
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
     maxAge: COOKIE_MAX_AGE,
-    // Remove domain restriction - let it default to current domain (render.com)
     path: '/'
   });
-  console.log('🍪 Auth cookie set for current domain (onrender.com)');
+  console.log('🍪 Auth cookie set');
 };
 
 // ==================== PROTECTED SUBSCRIPTIONS FOLDER ====================
@@ -136,11 +124,11 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     );
     const now = Math.floor(Date.now() / 1000);
     if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
-      console.log('❌ ACCESS DENIED → No active subscription for path:', req.path);
+      console.log('❌ ACCESS DENIED → No active subscription');
       if (req.accepts('html')) {
         return res.status(403).send(`
           <h1>Subscription Required</h1>
-          <p>You need an active subscription to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
+          <p>You need an active subscription. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
         `);
       } else {
         return res.status(403).json({ error: 'No active subscription' });
@@ -149,17 +137,13 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     next();
   } catch (err) {
     console.error('Subscription check error:', err);
-    if (req.accepts('html')) {
-      res.status(500).send('<h1>Server Error</h1><p>Please try again later.</p>');
-    } else {
-      res.status(500).json({ error: 'Server error' });
-    }
+    res.status(500).send('<h1>Server Error</h1>');
   }
 }, express.static(path.join(__dirname, 'subscriptions')));
 
 // ==================== ROUTES ====================
 
-// SIGNUP — WITH COOKIE
+// SIGNUP
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
   console.log('📝 SIGNUP ATTEMPT →', { username, email });
@@ -177,17 +161,17 @@ app.post('/api/signup', async (req, res) => {
     );
 
     const token = generateToken(result.insertId);
-    setAuthCookie(res, token); // Set httpOnly cookie
+    setAuthCookie(res, token);
 
-    console.log('✅ NEW USER CREATED → ID:', result.insertId);
-    res.json({ success: true, phrase, token }); // Still send token for localStorage backup
+    console.log('✅ NEW USER → ID:', result.insertId);
+    res.json({ success: true, phrase, token });
   } catch (err) {
-    console.error('❌ Signup error:', err);
+    console.error('Signup error:', err);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
-// LOGIN — WITH COOKIE + FAIL2BAN
+// LOGIN
 app.post('/api/login', async (req, res) => {
   const { username, password, phrase } = req.body;
   const ip = req.ip;
@@ -210,13 +194,13 @@ app.post('/api/login', async (req, res) => {
 
     if (passOk && phraseOk) {
       const token = generateToken(user.id);
-      setAuthCookie(res, token); // Set httpOnly cookie
+      setAuthCookie(res, token);
       clearAttempts(ip);
-      console.log('✅ LOGIN SUCCESS → Token generated for User ID:', user.id);
-      return res.json({ success: true, token }); // Still send token for localStorage backup
+      console.log('✅ LOGIN SUCCESS → User ID:', user.id);
+      return res.json({ success: true, token });
     } else {
       recordFailure(ip);
-      console.log('❌ LOGIN FAILED → Wrong credentials');
+      console.log('❌ LOGIN FAILED');
       res.status(401).json({ success: false });
     }
   } catch (err) {
@@ -224,9 +208,6 @@ app.post('/api/login', async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
-
-// PROFILE + AUTO-EXPIRE
-
 
 // CHECKOUT
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
@@ -241,7 +222,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       const customer = await stripe.customers.create({ metadata: { userId: req.userId.toString() } });
       customerId = customer.id;
       await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [customerId, req.userId]);
-      console.log('✅ NEW CUSTOMER CREATED → ID:', customerId);
+      console.log('✅ NEW CUSTOMER → ID:', customerId);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -254,7 +235,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
       metadata: { userId: req.userId.toString(), priceId: price_id }
     });
 
-    console.log('✅ CHECKOUT SESSION CREATED → ID:', session.id);
+    console.log('✅ CHECKOUT SESSION → ID:', session.id);
     res.json({ url: session.url });
   } catch (err) {
     console.error('Checkout error:', err);
@@ -262,14 +243,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// RECOVER + ACTIVATE ACCESS — WITH COOKIE
-
-
-
-// ================================================================================
-// STEP 2: REPLACE /api/me WITH THIS VERSION (Accurate Time Display)
-// ================================================================================
-
+// PROFILE / ME
 app.get('/api/me', requireAuth, async (req, res) => {
   console.log('👤 PROFILE REQUEST → User ID:', req.userId);
   try {
@@ -281,31 +255,26 @@ app.get('/api/me', requireAuth, async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     let active = user.subscription_status === 'active' && user.subscription_period_end > now;
 
-    // Auto-expire if period ended
     if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
       await pool.query('UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?', [req.userId]);
       active = false;
     }
 
-    // Calculate time remaining in different units
     const secondsLeft = active ? (user.subscription_period_end - now) : 0;
     const minutesLeft = Math.ceil(secondsLeft / 60);
     const hoursLeft = Math.ceil(secondsLeft / 3600);
     const daysLeft = Math.ceil(secondsLeft / 86400);
 
-    console.log('   Subscription active:', active);
-    console.log('   Time left:', secondsLeft, 'seconds =', minutesLeft, 'minutes =', hoursLeft, 'hours =', daysLeft, 'days');
-
     res.json({
       username: user.username,
       email: user.email,
       subscription_active: active,
-      seconds_left: secondsLeft,     // For accurate display
-      minutes_left: minutesLeft,     // Minutes
-      hours_left: hoursLeft,         // Hours
-      days_left: daysLeft,           // Days (backward compatibility)
-      period_end: user.subscription_period_end, // Raw timestamp
-      current_time: now              // Server time
+      seconds_left: secondsLeft,
+      minutes_left: minutesLeft,
+      hours_left: hoursLeft,
+      days_left: daysLeft,
+      period_end: user.subscription_period_end,
+      current_time: now
     });
   } catch (err) {
     console.error('Profile error:', err);
@@ -313,100 +282,66 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
-
-
-
-
-// ================================================================================
-// EXAMPLE: ADD 1 HOUR SUBSCRIPTION - COMPLETE CODE
-// Copy and paste these sections into your server.js
-// ================================================================================
-
-// ==================== STEP 1: UPDATE /api/recover-session ====================
-// Find this section in your server.js and ADD the new price condition
-
+// RECOVER SESSION — NOW ADDS TIME INSTEAD OF REPLACING
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
   console.log('🔄 RECOVER SESSION START → Session ID:', session_id);
 
   if (!session_id) {
-    console.log('❌ RECOVER FAILED → No session_id');
     return res.status(400).json({ error: 'No session_id' });
   }
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('📦 SESSION RETRIEVED → Status:', session.payment_status, 'Mode:', session.mode);
+    console.log('📦 SESSION → Status:', session.payment_status, 'Mode:', session.mode);
 
     const userId = session.metadata?.userId;
     if (!userId) {
-      console.log('❌ RECOVER FAILED → No userId in metadata');
       return res.status(400).json({ error: 'No user in session' });
     }
 
     if (session.payment_status !== 'paid') {
-      console.log('❌ RECOVER FAILED → Payment not paid');
       return res.status(400).json({ error: 'Payment not completed' });
     }
 
     const priceId = session.metadata?.priceId;
     const now = Math.floor(Date.now() / 1000);
-    let periodEnd = 0;
 
-    // EXISTING PRICES
-    if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') {
-      periodEnd = now + 7 * 86400; // Weekly (7 days = 604,800 seconds)
-      console.log('⏰ WEEKLY access granted → 7 days');
-    } 
+    // Get current end time (or now if none)
+    const [[userRow]] = await pool.query('SELECT subscription_period_end FROM users WHERE id = ?', [userId]);
+    const currentEnd = userRow.subscription_period_end || now;
+    let additionalSeconds = 0;
+
+    if (priceId === 'price_1SeMmCFF2HALdyFk4gylCDXx') {
+      additionalSeconds = 5 * 60; // 5 minutes
+      console.log('⏰ Adding 5 minutes');
+    }
+    else if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') {
+      additionalSeconds = 7 * 86400; // Weekly
+      console.log('⏰ Adding 7 days');
+    }
     else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') {
-      periodEnd = now + 30 * 86400; // Monthly (30 days = 2,592,000 seconds)
-      console.log('⏰ MONTHLY access granted → 30 days');
-    } 
+      additionalSeconds = 30 * 86400; // Monthly
+      console.log('⏰ Adding 30 days');
+    }
     else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') {
-      periodEnd = now + 365 * 86400; // Yearly (365 days = 31,536,000 seconds)
-      console.log('⏰ YEARLY access granted → 365 days');
+      additionalSeconds = 365 * 86400; // Yearly
+      console.log('⏰ Adding 365 days');
     }
-    
-    // ========================================
-    // ADD YOUR NEW PRICES HERE:
-    // ========================================
-    
-    // 5 MINUTES ACCESS
-    else if (priceId === 'price_1SeMmCFF2HALdyFk4gylCDXx') {
-      periodEnd = now + 5 * 60; // 5 minutes = 300 seconds
-      console.log('⏰ 5 MINUTE access granted');
-    }
-    
-    // // 1 HOUR ACCESS
-    // else if (priceId === 'price_YOUR_1HOUR_PRICE_ID_HERE') {
-    //   periodEnd = now + 60 * 60; // 1 hour = 3,600 seconds
-    //   console.log('⏰ 1 HOUR access granted');
-    // }
-    
-    // // 3 HOURS ACCESS
-    // else if (priceId === 'price_YOUR_3HOUR_PRICE_ID_HERE') {
-    //   periodEnd = now + 3 * 60 * 60; // 3 hours = 10,800 seconds
-    //   console.log('⏰ 3 HOURS access granted');
-    // }
-
-    
-    // ========================================
-    // END OF NEW PRICES
-    // ========================================
-    
     else {
-      console.log('❌ RECOVER FAILED → Unknown priceId:', priceId);
+      console.log('❌ Unknown priceId:', priceId);
       return res.status(400).json({ error: 'Unknown product' });
     }
 
-    console.log('📅 Period End:', periodEnd, '→', new Date(periodEnd * 1000));
+    const periodEnd = currentEnd + additionalSeconds;
+    console.log(`📅 Extending access: ${currentEnd} → ${periodEnd} (+${additionalSeconds}s)`);
 
     await pool.query(
       'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
       [periodEnd, userId]
     );
 
-    console.log('✅ ACCESS ACTIVATED → User ID:', userId);
+    console.log('✅ ACCESS EXTENDED → User ID:', userId);
 
     const token = generateToken(userId);
     setAuthCookie(res, token);
@@ -417,82 +352,7 @@ app.get('/api/recover-session', async (req, res) => {
   }
 });
 
-
-
-// ================================================================================
-// STEP 3: UPDATE PRICE IDs AT BOTTOM OF FILE (For Reference)
-// ================================================================================
-
-/* 
-SUBSCRIPTION PRICE IDs:
-
-⚡ QUICK ACCESS:
-5min   - $0.25  → price_YOUR_5MIN_PRICE_ID_HERE
-1hr    - $0.99  → price_YOUR_1HOUR_PRICE_ID_HERE
-3hr    - $1.99  → price_YOUR_3HOUR_PRICE_ID_HERE
-12hr   - $4.99  → price_YOUR_12HOUR_PRICE_ID_HERE
-24hr   - $7.99  → price_YOUR_24HOUR_PRICE_ID_HERE
-
-📅 EXTENDED ACCESS:
-Weekly  - $2.95  → price_1SYeXVFF2HALdyFkMR0pVo2u
-Monthly - $7.75  → price_1SYeY3FF2HALdyFk8znKF3un
-Yearly  - $75.00 → price_1SYeZVFF2HALdyFkxBfvFuTJ
-*/
-
-
-// ================================================================================
-// QUICK REFERENCE: TIME CALCULATIONS
-// ================================================================================
-
-/*
-COMMON DURATION CALCULATIONS:
-
-Minutes:
-5 min   = 5 * 60           = 300
-10 min  = 10 * 60          = 600
-15 min  = 15 * 60          = 900
-30 min  = 30 * 60          = 1,800
-
-Hours:
-1 hr    = 60 * 60          = 3,600
-2 hr    = 2 * 60 * 60      = 7,200
-3 hr    = 3 * 60 * 60      = 10,800
-6 hr    = 6 * 60 * 60      = 21,600
-12 hr   = 12 * 60 * 60     = 43,200
-24 hr   = 24 * 60 * 60     = 86,400
-
-Days:
-1 day   = 24 * 60 * 60     = 86,400
-7 days  = 7 * 24 * 60 * 60 = 604,800
-30 days = 30 * 24 * 60 * 60 = 2,592,000
-
-Formula:
-periodEnd = now + (duration_in_seconds)
-*/
-
-
-// ================================================================================
-// TESTING YOUR NEW DURATIONS
-// ================================================================================
-
-/*
-For testing, temporarily change to very short durations:
-
-// Test 1 minute instead of 1 hour
-periodEnd = now + 60; // 1 minute
-
-// Test 5 seconds instead of 5 minutes
-periodEnd = now + 5; // 5 seconds
-
-This way you can see the expiration happen quickly without waiting!
-
-Remember to change back to real durations before production deployment.
-*/
-
-
-
-
-// CANCEL ACCESS
+// CANCEL
 app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   console.log('❌ CANCEL REQUEST → User ID:', req.userId);
 
@@ -502,7 +362,7 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
       [req.userId]
     );
 
-    console.log('✅ CANCEL SUCCESS → User ID:', req.userId);
+    console.log('✅ CANCEL SUCCESS');
     res.json({ success: true });
   } catch (err) {
     console.error('Cancel error:', err);
@@ -510,7 +370,7 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   }
 });
 
-// LOGOUT — CLEAR COOKIE
+// LOGOUT
 app.post('/api/logout', (req, res) => {
   res.clearCookie('auth_token', {
     httpOnly: true,
@@ -518,23 +378,15 @@ app.post('/api/logout', (req, res) => {
     sameSite: 'none',
     path: '/'
   });
-  console.log('🚪 User logged out, cookie cleared');
+  console.log('🚪 Logout – cookie cleared');
   res.json({ success: true });
 });
 
-// ====================
-// ACCESS PREMIUM PAGE - SPECIAL ROUTE
-// This is the KEY fix for cross-origin premium access!
-// ====================
+// ACCESS PREMIUM PAGE
 app.post('/api/access-premium', async (req, res) => {
   const { token } = req.body;
-  
-  console.log('🔑 ACCESS PREMIUM REQUEST RECEIVED');
-  console.log('   Token provided:', token ? 'YES' : 'NO');
-  console.log('   Request body:', req.body);
-  
+
   if (!token) {
-    console.log('❌ No token provided in request body');
     return res.status(401).send(`
       <h1>Login Required</h1>
       <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a> first.</p>
@@ -543,74 +395,40 @@ app.post('/api/access-premium', async (req, res) => {
 
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('❌ Invalid token - verification failed');
     return res.status(401).send(`
       <h1>Session Expired</h1>
       <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login again</a>.</p>
     `);
   }
 
-  console.log('✅ Token verified - User ID:', payload.userId);
-
   try {
     const [[user]] = await pool.query(
       'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
       [payload.userId]
     );
-    
-    console.log('   User subscription_status:', user.subscription_status);
-    console.log('   User subscription_period_end:', user.subscription_period_end);
-    
+
     const now = Math.floor(Date.now() / 1000);
-    console.log('   Current time (UNIX):', now);
-    console.log('   Subscription active?:', user.subscription_status === 'active' && user.subscription_period_end > now);
-    
     if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
-      console.log('❌ No active subscription - access denied');
       return res.status(403).send(`
         <h1>Subscription Required</h1>
-        <p>You need an active subscription to access this content. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
+        <p><a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
       `);
     }
 
-    // Set the cookie so subsequent requests on this domain work
-    console.log('🍪 Setting auth cookie...');
     setAuthCookie(res, token);
-    
-    console.log('✅ Access granted! Redirecting to /subscriptions/premium.html');
-    console.log('   Cookie should now be set for domain: .techsport.app');
-    
-    // Redirect to the premium page
-    // The cookie we just set will be included in this request
     res.redirect('/subscriptions/premium.html');
-    
   } catch (err) {
-    console.error('❌ Access premium error:', err);
-    res.status(500).send('<h1>Server Error</h1><p>Please try again later.</p>');
+    console.error('Access premium error:', err);
+    res.status(500).send('<h1>Server Error</h1>');
   }
 });
 
-// STATIC FILES
+// STATIC FALLBACK
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('🚀 BACKEND IS LIVE — HYBRID AUTH SYSTEM');
-  console.log(`   Listening on port ${PORT}`);
+  console.log('🚀 BACKEND LIVE on port', PORT);
 });
-
-/* 
-PRICE IDS:
-W single price_1SYeXVFF2HALdyFkMR0pVo2u
-M single - price_1SYeY3FF2HALdyFk8znKF3un
-Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
-*/
-
-/* 
-PRICE IDS:
-W single price_1SYeXVFF2HALdyFkMR0pVo2u
-M single - price_1SYeY3FF2HALdyFk8znKF3un
-Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
-*/
