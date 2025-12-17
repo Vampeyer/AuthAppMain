@@ -232,8 +232,8 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
     if (user.stripe_customer_id) {
       const subs = await stripe.subscriptions.list({ customer: user.stripe_customer_id });
       for (const sub of subs.data) {
-        await stripe.subscriptions.del(sub.id);
-        console.log('BACK: Immediately deleted Stripe sub:', sub.id);
+        await stripe.subscriptions.cancel(sub.id);  // Fixed: use cancel() instead of del()
+        console.log('BACK: Immediately cancelled Stripe sub:', sub.id);
       }
     }
 
