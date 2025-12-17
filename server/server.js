@@ -620,48 +620,145 @@ Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
 
 
 // Debug Subscription 
+// Replace your existing /api/debug-subscription with this COMPREHENSIVE version
+// This will show EXACTLY what's happening
 
 app.get('/api/debug-subscription', requireAuth, async (req, res) => {
+  console.log('');
+  console.log('========================================');
+  console.log('🔍 COMPREHENSIVE DEBUG START');
+  console.log('========================================');
+  
   try {
+    // Get user data
     const [[user]] = await pool.query(
       'SELECT id, username, subscription_status, subscription_period_end FROM users WHERE id = ?',
       [req.userId]
     );
     
-    const now = Math.floor(Date.now() / 1000);
+    // Current time calculations
     const nowMs = Date.now();
+    const nowSeconds = Math.floor(nowMs / 1000);
     
-    const periodEnd = user.subscription_period_end;
-    const difference = periodEnd - now;
-    
-    console.log('🔍 DEBUG SUBSCRIPTION CHECK:');
+    console.log('📊 RAW DATABASE VALUES:');
     console.log('   User ID:', user.id);
     console.log('   Username:', user.username);
     console.log('   Status:', user.subscription_status);
-    console.log('   Period End (raw from DB):', periodEnd);
-    console.log('   Current time (seconds):', now);
-    console.log('   Current time (ms):', nowMs);
-    console.log('   Difference:', difference, 'seconds');
-    console.log('   Difference:', Math.floor(difference / 60), 'minutes');
-    console.log('   Difference:', Math.floor(difference / 3600), 'hours');
-    console.log('   Period End as Date:', new Date(periodEnd * 1000));
-    console.log('   Current time as Date:', new Date(now * 1000));
+    console.log('   Period End (raw):', user.subscription_period_end);
+    console.log('');
     
+    console.log('⏰ TIME VALUES:');
+    console.log('   Current time (milliseconds):', nowMs);
+    console.log('   Current time (seconds):', nowSeconds);
+    console.log('   Current time (Date):', new Date(nowMs).toISOString());
+    console.log('');
+    
+    console.log('📅 SUBSCRIPTION END TIME:');
+    console.log('   Period End (seconds):', user.subscription_period_end);
+    console.log('   Period End (Date):', new Date(user.subscription_period_end * 1000).toISOString());
+    console.log('');
+    
+    // Calculate difference
+    const differenceSeconds = user.subscription_period_end - nowSeconds;
+    const differenceMinutes = differenceSeconds / 60;
+    const differenceHours = differenceSeconds / 3600;
+    const differenceDays = differenceSeconds / 86400;
+    
+    console.log('⏱️  TIME REMAINING CALCULATIONS:');
+    console.log('   Difference (seconds):', differenceSeconds);
+    console.log('   Difference (minutes):', differenceMinutes.toFixed(2));
+    console.log('   Difference (hours):', differenceHours.toFixed(2));
+    console.log('   Difference (days):', differenceDays.toFixed(2));
+    console.log('');
+    
+    // What SHOULD the period_end be for 5 minutes?
+    const expectedPeriodEnd = nowSeconds + 300; // 5 minutes = 300 seconds
+    const actualVsExpected = user.subscription_period_end - expectedPeriodEnd;
+    
+    console.log('🎯 EXPECTED vs ACTUAL (for 5 minutes):');
+    console.log('   Expected Period End:', expectedPeriodEnd);
+    console.log('   Actual Period End:', user.subscription_period_end);
+    console.log('   Difference:', actualVsExpected, 'seconds');
+    console.log('   Difference:', (actualVsExpected / 60).toFixed(2), 'minutes');
+    console.log('   Difference:', (actualVsExpected / 3600).toFixed(2), 'hours');
+    console.log('');
+    
+    // Check if it's approximately 5 hours instead of 5 minutes
+    const isApprox5Hours = differenceHours >= 4.5 && differenceHours <= 5.5;
+    const isApprox5Minutes = differenceMinutes >= 4 && differenceMinutes <= 6;
+    
+    console.log('🚨 DIAGNOSIS:');
+    if (isApprox5Hours) {
+      console.log('   ❌ PROBLEM FOUND: Subscription shows ~5 HOURS instead of 5 MINUTES');
+      console.log('   The database has the WRONG value stored!');
+      console.log('   Something multiplied by 60 somewhere (5 min × 60 = 5 hours)');
+    } else if (isApprox5Minutes) {
+      console.log('   ✅ LOOKS CORRECT: Subscription is approximately 5 minutes');
+    } else {
+      console.log('   ⚠️  UNEXPECTED: Time remaining is neither 5 hours nor 5 minutes');
+      console.log('   Actual time:', differenceMinutes.toFixed(2), 'minutes');
+    }
+    console.log('');
+    
+    // Check what the value was when it was set
+    const timeWhenSet = user.subscription_period_end - differenceSeconds;
+    const secondsAdded = user.subscription_period_end - timeWhenSet;
+    
+    console.log('📝 WHEN SUBSCRIPTION WAS SET:');
+    console.log('   Time when set (estimated):', new Date(timeWhenSet * 1000).toISOString());
+    console.log('   Seconds added to "now":', secondsAdded);
+    console.log('   Minutes added:', (secondsAdded / 60).toFixed(2));
+    console.log('   Hours added:', (secondsAdded / 3600).toFixed(2));
+    console.log('');
+    
+    console.log('========================================');
+    console.log('🔍 COMPREHENSIVE DEBUG END');
+    console.log('========================================');
+    console.log('');
+    
+    // Send detailed response
     res.json({
-      user_id: user.id,
-      username: user.username,
-      status: user.subscription_status,
-      period_end_raw: periodEnd,
-      period_end_date: new Date(periodEnd * 1000).toISOString(),
-      current_time_seconds: now,
-      current_time_date: new Date(now * 1000).toISOString(),
-      difference_seconds: difference,
-      difference_minutes: Math.floor(difference / 60),
-      difference_hours: Math.floor(difference / 3600),
-      looks_correct: difference >= 250 && difference <= 350 // Should be ~300 for 5 minutes
+      raw_database: {
+        user_id: user.id,
+        username: user.username,
+        status: user.subscription_status,
+        period_end_raw: user.subscription_period_end
+      },
+      current_time: {
+        milliseconds: nowMs,
+        seconds: nowSeconds,
+        iso_string: new Date(nowMs).toISOString()
+      },
+      subscription_end: {
+        seconds: user.subscription_period_end,
+        iso_string: new Date(user.subscription_period_end * 1000).toISOString()
+      },
+      time_remaining: {
+        seconds: differenceSeconds,
+        minutes: parseFloat(differenceMinutes.toFixed(2)),
+        hours: parseFloat(differenceHours.toFixed(2)),
+        days: parseFloat(differenceDays.toFixed(2))
+      },
+      expected_vs_actual: {
+        expected_period_end_for_5min: expectedPeriodEnd,
+        actual_period_end: user.subscription_period_end,
+        difference_seconds: actualVsExpected,
+        difference_minutes: parseFloat((actualVsExpected / 60).toFixed(2)),
+        difference_hours: parseFloat((actualVsExpected / 3600).toFixed(2))
+      },
+      diagnosis: {
+        is_approximately_5_hours: isApprox5Hours,
+        is_approximately_5_minutes: isApprox5Minutes,
+        problem: isApprox5Hours ? 'DATABASE HAS WRONG VALUE - Shows 5 hours instead of 5 minutes' : 
+                 isApprox5Minutes ? 'Looks correct' : 
+                 'Unexpected duration',
+        recommendation: isApprox5Hours ? 
+          'Cancel and repurchase with current code, OR manually update database' : 
+          'No action needed'
+      }
     });
   } catch (err) {
-    console.error('Debug error:', err);
-    res.status(500).json({ error: 'Debug failed' });
+    console.error('❌ Debug error:', err);
+    res.status(500).json({ error: 'Debug failed', details: err.message });
   }
 });
