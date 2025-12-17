@@ -32,14 +32,45 @@ async function getHeaders() {
 }
 
 async function loadProfile() {
+  console.log('FRONT: Starting loadProfile');
+  const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get('session_id');
+  console.log('FRONT: URL params - session_id:', sessionId);
+
+  let recovered = false;
+  if (sessionId) {
+    console.log('FRONT: Recovering session from Stripe:', sessionId);
+    try {
+      const recoverRes = await fetch(`${BACKEND}/api/recover-session?session_id=${sessionId}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: await getHeaders()
+      });
+      console.log('FRONT: Recover response status:', recoverRes.status);
+      
+      if (recoverRes.ok) {
+        const data = await recoverRes.json();
+        console.log('FRONT: Recover data:', data);
+        if (data.token) localStorage.setItem('token', data.token);
+        recovered = true;
+      }
+      history.replaceState(null, '', 'profile.html');
+    } catch (e) {
+      console.error('FRONT: Recover session failed:', e);
+    }
+  }
+
   try {
     const res = await fetch(`${BACKEND}/api/me`, { 
       credentials: 'include',
       headers: await getHeaders() 
     });
+    console.log('FRONT: /api/me response status:', res.status);
     
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
+    console.log('FRONT: User data from /api/me:', u);
+    console.log('FRONT: Subscription active?', u.subscription_active);
 
     document.getElementById('content').innerHTML = `
       <h3>Welcome, <strong>${u.username}</strong>!</h3>
@@ -72,13 +103,20 @@ async function loadProfile() {
       <p><button onclick="logout()" style="margin-top:20px;padding:10px 20px;background:#555;color:white;border:none;border-radius:4px;">Logout</button></p>
     `;
 
+    if (sessionId && recovered) {
+      document.getElementById('content').insertAdjacentHTML('afterbegin',
+        '<div style="background:#d4edda;color:#155724;padding:16px;border-radius:8px;margin-bottom:20px;font-weight:bold;">✅ Thank you! Your subscription is now ACTIVE!</div>'
+      );
+    }
+
   } catch (err) {
-    console.error('Load profile error:', err);
+    console.error('FRONT: Load profile error:', err);
     document.getElementById('content').innerHTML = 'Not logged in → <a href="login.html">Login</a>';
   }
 }
 
 async function buy(id) {
+  console.log('FRONT: Buy initiated for price_id:', id);
   fetch(`${BACKEND}/api/create-checkout-session`, {
     method: 'POST',
     credentials: 'include',
@@ -86,11 +124,15 @@ async function buy(id) {
     body: JSON.stringify({ price_id: id })
   })
   .then(r => r.json())
-  .then(d => location.href = d.url)
-  .catch(e => console.error('Buy error:', e));
+  .then(d => {
+    console.log('FRONT: Checkout session URL:', d.url);
+    location.href = d.url;
+  })
+  .catch(e => console.error('FRONT: Buy error:', e));
 }
 
 async function cancelSub() {
+  console.log('FRONT: Cancel subscription initiated');
   if (confirm('Cancel your subscription?\n\nYour access will remain until the end of your current billing period.')) {
     try {
       const res = await fetch(`${BACKEND}/api/cancel-subscription-now`, {
@@ -98,6 +140,7 @@ async function cancelSub() {
         credentials: 'include',
         headers: await getHeaders()
       });
+      console.log('FRONT: Cancel response status:', res.status);
       if (res.ok) {
         alert('Subscription cancelled.');
         loadProfile();
@@ -105,28 +148,21 @@ async function cancelSub() {
         alert('Cancel failed.');
       }
     } catch (e) {
+      console.error('FRONT: Cancel error:', e);
       alert('Network error.');
     }
   }
 }
 
 async function logout() {
+  console.log('FRONT: Logout initiated');
   await fetch(`${BACKEND}/api/logout`, { method: 'POST', credentials: 'include' });
   localStorage.removeItem('token');
   location.href = 'login.html';
 }
 
-
-
-
-
-// ====================
-// OPEN BACKEND PREMIUM PAGE
-// ====================
 async function openPremiumBackend() {
-  // ... (unchanged from previous version) ...
-  console.log('Opening backend premium page...');
-  
+  console.log('FRONT: Opening premium backend');
   const token = localStorage.getItem('token');
   if (!token) {
     alert('Please log in first');
@@ -139,6 +175,7 @@ async function openPremiumBackend() {
       credentials: 'include',
       headers: await getHeaders() 
     });
+    console.log('FRONT: Premium check /api/me status:', response.status);
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -150,6 +187,7 @@ async function openPremiumBackend() {
     }
 
     const user = await response.json();
+    console.log('FRONT: Premium user data:', user);
 
     if (!user.subscription_active) {
       alert('Must have subscription to access this content');
@@ -171,13 +209,14 @@ async function openPremiumBackend() {
     form.submit();
     document.body.removeChild(form);
 
+    console.log('FRONT: Premium form submitted');
+
   } catch (error) {
-    console.error('Error:', error);
+    console.error('FRONT: Premium access error:', error);
     alert('Error accessing premium content');
   }
 }
 
-// Start
 loadProfile();
 </script>
 </body>
