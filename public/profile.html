@@ -33,7 +33,7 @@ async function getHeaders() {
 
 // ====================
 // FORMAT TIME REMAINING
-// Shows: "X days Y hours Z minutes" or just "Y hours Z minutes" for short durations
+// Shows: "X days Y hours Z minutes W seconds" including lower units with zeros where appropriate
 // ====================
 function formatTimeRemaining(seconds) {
   if (seconds <= 0) return 'Expired';
@@ -41,17 +41,17 @@ function formatTimeRemaining(seconds) {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
   
   let parts = [];
+  parts.push(`${days} day${days !== 1 ? 's' : ''}`);
+  parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
+  parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
+  parts.push(`${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`);
   
-  if (days > 0) {
-    parts.push(`${days} day${days > 1 ? 's' : ''}`);
-  }
-  if (hours > 0) {
-    parts.push(`${hours} hour${hours > 1 ? 's' : ''}`);
-  }
-  if (minutes > 0 || parts.length === 0) {
-    parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
+  // Remove leading zero units, but keep at least the last one
+  while (parts.length > 1 && parts[0].startsWith('0 ')) {
+    parts.shift();
   }
   
   return parts.join(' ');
@@ -110,22 +110,37 @@ async function loadProfile(reloadAfterRecover = false) {
     if (!res.ok) throw new Error('Fetch failed');
     const u = await res.json();
 
-    // Calculate seconds remaining
-    const secondsLeft = u.days_left * 86400; // Convert days back to seconds for accuracy
-    const timeDisplay = formatTimeRemaining(secondsLeft);
-    const timeColor = getTimeColor(secondsLeft);
+    // Use precise seconds_left from server for initial display
+    const initialSecondsLeft = u.seconds_left;
+    const initialTimeDisplay = formatTimeRemaining(initialSecondsLeft);
+    const initialTimeColor = getTimeColor(initialSecondsLeft);
+
+    // Format exact end date and time
+    const endDate = new Date(u.period_end * 1000);
+    const formattedEnd = endDate.toLocaleString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
 
     document.getElementById('content').innerHTML = `
       <h3>Welcome, <strong>${u.username}</strong>!</h3>
       <p>Email: ${u.email}</p>
-      <p>Subscription: <strong style="color:${u.subscription_active?timeColor:'red'};font-size:1.2em;">
-        ${u.subscription_active ? `ACTIVE (${timeDisplay} left)` : 'INACTIVE'}
+      <p>Subscription: <strong id="sub-status" style="color:${u.subscription_active ? initialTimeColor : 'red'};font-size:1.2em;">
+        ${u.subscription_active ? `ACTIVE (${initialTimeDisplay} left)` : 'INACTIVE'}
       </strong></p>
 
       ${u.subscription_active ? `
         <div style="background:#fff3cd;padding:15px;border-radius:8px;margin:20px 0;">
           <strong>⏰ Time Remaining:</strong><br>
-          <span style="font-size:2em;color:${timeColor};">${timeDisplay}</span>
+          <span id="time-remaining" style="font-size:2em;color:${initialTimeColor};">${initialTimeDisplay}</span>
+          <br><br>
+          <strong>Expires on:</strong> ${formattedEnd}
         </div>
         <button onclick="cancelSub()" style="background:#c62828;color:white;padding:16px 32px;border:none;border-radius:8px;font-size:18px;cursor:pointer;">
           Cancel Access
@@ -164,13 +179,45 @@ async function loadProfile(reloadAfterRecover = false) {
       );
     }
 
-    // Auto-refresh if subscription is active and expiring soon
-    if (u.subscription_active && secondsLeft < 600) {
-      console.log('⚠️ Subscription expiring soon - will auto-refresh in 30 seconds');
-      setTimeout(() => {
-        console.log('🔄 Auto-refreshing to check subscription status...');
-        loadProfile();
-      }, 30000); // Refresh every 30 seconds when < 10 minutes left
+    // Start live countdown if active
+    if (u.subscription_active) {
+      const endMs = u.period_end * 1000;
+      let timerInterval;
+
+      const updateTimer = () => {
+        const nowMs = Date.now();
+        const remainingMs = endMs - nowMs;
+
+        if (remainingMs <= 0) {
+          if (document.getElementById('time-remaining')) {
+            document.getElementById('time-remaining').textContent = 'Expired';
+            document.getElementById('time-remaining').style.color = 'red';
+          }
+          if (document.getElementById('sub-status')) {
+            document.getElementById('sub-status').innerHTML = 'INACTIVE';
+            document.getElementById('sub-status').style.color = 'red';
+          }
+          clearInterval(timerInterval);
+          setTimeout(loadProfile, 1000); // Reload to show subscribe options
+          return;
+        }
+
+        const secondsLeft = Math.floor(remainingMs / 1000);
+        const display = formatTimeRemaining(secondsLeft);
+        const color = getTimeColor(secondsLeft);
+
+        if (document.getElementById('time-remaining')) {
+          document.getElementById('time-remaining').textContent = display;
+          document.getElementById('time-remaining').style.color = color;
+        }
+        if (document.getElementById('sub-status')) {
+          document.getElementById('sub-status').innerHTML = `ACTIVE (${display} left)`;
+          document.getElementById('sub-status').style.color = color;
+        }
+      };
+
+      updateTimer(); // Initial update
+      timerInterval = setInterval(updateTimer, 1000);
     }
 
   } catch (err) {

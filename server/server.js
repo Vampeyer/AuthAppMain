@@ -614,3 +614,54 @@ W single price_1SYeXVFF2HALdyFkMR0pVo2u
 M single - price_1SYeY3FF2HALdyFk8znKF3un
 Y single - price_1SYeZVFF2HALdyFkxBfvFuTJ
 */
+
+
+
+
+
+// Debug Subscription 
+
+app.get('/api/debug-subscription', requireAuth, async (req, res) => {
+  try {
+    const [[user]] = await pool.query(
+      'SELECT id, username, subscription_status, subscription_period_end FROM users WHERE id = ?',
+      [req.userId]
+    );
+    
+    const now = Math.floor(Date.now() / 1000);
+    const nowMs = Date.now();
+    
+    const periodEnd = user.subscription_period_end;
+    const difference = periodEnd - now;
+    
+    console.log('🔍 DEBUG SUBSCRIPTION CHECK:');
+    console.log('   User ID:', user.id);
+    console.log('   Username:', user.username);
+    console.log('   Status:', user.subscription_status);
+    console.log('   Period End (raw from DB):', periodEnd);
+    console.log('   Current time (seconds):', now);
+    console.log('   Current time (ms):', nowMs);
+    console.log('   Difference:', difference, 'seconds');
+    console.log('   Difference:', Math.floor(difference / 60), 'minutes');
+    console.log('   Difference:', Math.floor(difference / 3600), 'hours');
+    console.log('   Period End as Date:', new Date(periodEnd * 1000));
+    console.log('   Current time as Date:', new Date(now * 1000));
+    
+    res.json({
+      user_id: user.id,
+      username: user.username,
+      status: user.subscription_status,
+      period_end_raw: periodEnd,
+      period_end_date: new Date(periodEnd * 1000).toISOString(),
+      current_time_seconds: now,
+      current_time_date: new Date(now * 1000).toISOString(),
+      difference_seconds: difference,
+      difference_minutes: Math.floor(difference / 60),
+      difference_hours: Math.floor(difference / 3600),
+      looks_correct: difference >= 250 && difference <= 350 // Should be ~300 for 5 minutes
+    });
+  } catch (err) {
+    console.error('Debug error:', err);
+    res.status(500).json({ error: 'Debug failed' });
+  }
+});
