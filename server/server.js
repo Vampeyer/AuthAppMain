@@ -1,8 +1,8 @@
-// server.js — HYBRID AUTH: httpOnly Cookies + Authorization Headers
+// server.js — RECURRING SUBSCRIPTION MODEL WITH STRIPE
 require('dotenv').config({ path: '.env.production' });
 
 console.log('================================================');
-console.log('BACKEND STARTING — HYBRID AUTH SYSTEM');
+console.log('BACKEND STARTING — RECURRING SUBSCRIPTION SYSTEM');
 console.log('================================================');
 
 const express = require('express');
@@ -17,10 +17,8 @@ const { checkRateLimit, recordFailure, clearAttempts } = require('./fail2ban');
 
 const app = express();
 
-// ==================== COOKIE PARSER ====================
 app.use(cookieParser());
 
-// ==================== CORS ====================
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const allowedOrigins = [
@@ -46,7 +44,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
-// ==================== JWT ====================
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '20m';
 const COOKIE_MAX_AGE = 20 * 60 * 1000;
@@ -58,52 +55,41 @@ const verifyToken = (token) => {
   catch { return null; }
 };
 
-// ==================== HYBRID AUTH MIDDLEWARE ====================
 const requireAuth = (req, res, next) => {
-  console.log('🔐 AUTH CHECK for path:', req.path);
-
   let token = null;
 
   if (req.cookies && req.cookies.auth_token) {
     token = req.cookies.auth_token;
-    console.log('   ✅ Token from cookie');
   }
   else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
     token = req.headers.authorization.split(' ')[1];
-    console.log('   ✅ Token from header');
   }
 
   if (!token) {
-    console.log('   ❌ No token');
     if (req.accepts('html')) {
       return res.status(401).send(`
         <h1>Login Required</h1>
-        <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a> to access this content.</p>
+        <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a>.</p>
       `);
-    } else {
-      return res.status(401).json({ error: 'Unauthorized' });
     }
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const payload = verifyToken(token);
   if (!payload) {
-    console.log('   ❌ Invalid token');
     if (req.accepts('html')) {
       return res.status(401).send(`
         <h1>Session Expired</h1>
         <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login again</a>.</p>
       `);
-    } else {
-      return res.status(401).json({ error: 'Invalid token' });
     }
+    return res.status(401).json({ error: 'Invalid token' });
   }
 
   req.userId = payload.userId;
-  console.log('   ✅ AUTH SUCCESS → User ID:', req.userId);
   next();
 };
 
-// ==================== SET AUTH COOKIE ====================
 const setAuthCookie = (res, token) => {
   res.cookie('auth_token', token, {
     httpOnly: true,
@@ -112,27 +98,20 @@ const setAuthCookie = (res, token) => {
     maxAge: COOKIE_MAX_AGE,
     path: '/'
   });
-  console.log('🍪 Auth cookie set');
 };
 
-// ==================== PROTECTED SUBSCRIPTIONS FOLDER ====================
+// PROTECTED PREMIUM CONTENT
 app.use('/subscriptions', requireAuth, async (req, res, next) => {
   try {
-    const [[user]] = await pool.query(
-      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
-      [req.userId]
-    );
-    const now = Math.floor(Date.now() / 1000);
-    if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
-      console.log('❌ ACCESS DENIED → No active subscription');
+    const [[user]] = await pool.query('SELECT subscription_status FROM users WHERE id = ?', [req.userId]);
+    if (user.subscription_status !== 'active') {
       if (req.accepts('html')) {
         return res.status(403).send(`
           <h1>Subscription Required</h1>
-          <p>You need an active subscription. <a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
+          <p><a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
         `);
-      } else {
-        return res.status(403).json({ error: 'No active subscription' });
       }
+      return res.status(403).json({ error: 'Active subscription required' });
     }
     next();
   } catch (err) {
@@ -141,12 +120,10 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
   }
 }, express.static(path.join(__dirname, 'subscriptions')));
 
-// ==================== ROUTES ====================
+// ROUTES
 
-// SIGNUP
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
-  console.log('📝 SIGNUP ATTEMPT →', { username, email });
 
   try {
     const [[exists]] = await pool.query('SELECT 1 FROM users WHERE username = ? OR email = ?', [username, email]);
@@ -156,14 +133,13 @@ app.post('/api/signup', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
 
     const [result] = await pool.query(
-      'INSERT INTO users (username, email, password_hash, phrase) VALUES (?, ?, ?, ?)',
+      'INSERT INTO users (username, email, password_hash, phrase, subscription_status) VALUES (?, ?, ?, ?, "inactive")',
       [username, email, hash, phrase]
     );
 
     const token = generateToken(result.insertId);
     setAuthCookie(res, token);
 
-    console.log('✅ NEW USER → ID:', result.insertId);
     res.json({ success: true, phrase, token });
   } catch (err) {
     console.error('Signup error:', err);
@@ -171,71 +147,60 @@ app.post('/api/signup', async (req, res) => {
   }
 });
 
-// LOGIN
 app.post('/api/login', async (req, res) => {
   const { username, password, phrase } = req.body;
   const ip = req.ip;
-  console.log('🔐 LOGIN ATTEMPT →', username, 'IP:', ip);
 
   const limit = checkRateLimit(ip);
   if (limit.banned) {
-    return res.status(429).json({ success: false, error: `Too many attempts. Try again in ${limit.remaining} seconds.` });
+    return res.status(429).json({ success: false, error: `Too many attempts. Try again in ${limit.remaining}s.` });
   }
 
   try {
     const [[user]] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-    if (!user) {
+    if (!user || !(await bcrypt.compare(password, user.password_hash)) || user.phrase.trim() !== phrase.trim()) {
       recordFailure(ip);
       return res.status(401).json({ success: false });
     }
 
-    const passOk = await bcrypt.compare(password, user.password_hash);
-    const phraseOk = user.phrase.trim() === phrase.trim();
-
-    if (passOk && phraseOk) {
-      const token = generateToken(user.id);
-      setAuthCookie(res, token);
-      clearAttempts(ip);
-      console.log('✅ LOGIN SUCCESS → User ID:', user.id);
-      return res.json({ success: true, token });
-    } else {
-      recordFailure(ip);
-      console.log('❌ LOGIN FAILED');
-      res.status(401).json({ success: false });
-    }
+    clearAttempts(ip);
+    const token = generateToken(user.id);
+    setAuthCookie(res, token);
+    res.json({ success: true, token });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ success: false });
   }
 });
 
-// CHECKOUT
+// CREATE RECURRING CHECKOUT SESSION
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   const { price_id } = req.body;
-  console.log('💳 CHECKOUT START → Price ID:', price_id, 'User ID:', req.userId);
 
   try {
-    const [[user]] = await pool.query('SELECT stripe_customer_id FROM users WHERE id = ?', [req.userId]);
-    let customerId = user.stripe_customer_id;
+    const [[user]] = await pool.query('SELECT email, stripe_customer_id FROM users WHERE id = ?', [req.userId]);
+    let customer;
 
-    if (!customerId) {
-      const customer = await stripe.customers.create({ metadata: { userId: req.userId.toString() } });
-      customerId = customer.id;
-      await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [customerId, req.userId]);
-      console.log('✅ NEW CUSTOMER → ID:', customerId);
+    if (user.stripe_customer_id) {
+      customer = await stripe.customers.retrieve(user.stripe_customer_id);
+    } else {
+      customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { userId: req.userId.toString() }
+      });
+      await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [customer.id, req.userId]);
     }
 
     const session = await stripe.checkout.sessions.create({
-      customer: customerId,
+      customer: customer.id,
       payment_method_types: ['card'],
       line_items: [{ price: price_id, quantity: 1 }],
-      mode: 'payment',
+      mode: 'subscription',
       success_url: `https://techsport.app/streampaltest/public/profile.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://techsport.app/streampaltest/public/profile.html?cancel=true`,
-      metadata: { userId: req.userId.toString(), priceId: price_id }
+      metadata: { userId: req.userId.toString() }
     });
 
-    console.log('✅ CHECKOUT SESSION → ID:', session.id);
     res.json({ url: session.url });
   } catch (err) {
     console.error('Checkout error:', err);
@@ -243,105 +208,22 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   }
 });
 
-// PROFILE / ME
-app.get('/api/me', requireAuth, async (req, res) => {
-  console.log('👤 PROFILE REQUEST → User ID:', req.userId);
-  try {
-    const [[user]] = await pool.query(
-      'SELECT username, email, subscription_status, subscription_period_end FROM users WHERE id = ?',
-      [req.userId]
-    );
-
-    const now = Math.floor(Date.now() / 1000);
-    let active = user.subscription_status === 'active' && user.subscription_period_end > now;
-
-    if (user.subscription_status === 'active' && user.subscription_period_end <= now) {
-      await pool.query('UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?', [req.userId]);
-      active = false;
-    }
-
-    const secondsLeft = active ? (user.subscription_period_end - now) : 0;
-    const minutesLeft = Math.ceil(secondsLeft / 60);
-    const hoursLeft = Math.ceil(secondsLeft / 3600);
-    const daysLeft = Math.ceil(secondsLeft / 86400);
-
-    res.json({
-      username: user.username,
-      email: user.email,
-      subscription_active: active,
-      seconds_left: secondsLeft,
-      minutes_left: minutesLeft,
-      hours_left: hoursLeft,
-      days_left: daysLeft,
-      period_end: user.subscription_period_end,
-      current_time: now
-    });
-  } catch (err) {
-    console.error('Profile error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// RECOVER SESSION — NOW ADDS TIME INSTEAD OF REPLACING
+// RECOVER SESSION & ACTIVATE SUBSCRIPTION
 app.get('/api/recover-session', async (req, res) => {
   const { session_id } = req.query;
-  console.log('🔄 RECOVER SESSION START → Session ID:', session_id);
-
-  if (!session_id) {
-    return res.status(400).json({ error: 'No session_id' });
-  }
+  if (!session_id) return res.status(400).json({ error: 'No session_id' });
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('📦 SESSION → Status:', session.payment_status, 'Mode:', session.mode);
-
-    const userId = session.metadata?.userId;
-    if (!userId) {
-      return res.status(400).json({ error: 'No user in session' });
-    }
-
-    if (session.payment_status !== 'paid') {
+    if (session.payment_status !== 'paid' && session.mode === 'subscription') {
       return res.status(400).json({ error: 'Payment not completed' });
     }
 
-    const priceId = session.metadata?.priceId;
-    const now = Math.floor(Date.now() / 1000);
+    const userId = session.metadata?.userId;
+    if (!userId) return res.status(400).json({ error: 'No user in session' });
 
-    // Get current end time (or now if none)
-    const [[userRow]] = await pool.query('SELECT subscription_period_end FROM users WHERE id = ?', [userId]);
-    const currentEnd = userRow.subscription_period_end || now;
-    let additionalSeconds = 0;
-
-    if (priceId === 'price_1SeMmCFF2HALdyFk4gylCDXx') {
-      additionalSeconds = 5 * 60; // 5 minutes
-      console.log('⏰ Adding 5 minutes');
-    }
-    else if (priceId === 'price_1SYeXVFF2HALdyFkMR0pVo2u') {
-      additionalSeconds = 7 * 86400; // Weekly
-      console.log('⏰ Adding 7 days');
-    }
-    else if (priceId === 'price_1SYeY3FF2HALdyFk8znKF3un') {
-      additionalSeconds = 30 * 86400; // Monthly
-      console.log('⏰ Adding 30 days');
-    }
-    else if (priceId === 'price_1SYeZVFF2HALdyFkxBfvFuTJ') {
-      additionalSeconds = 365 * 86400; // Yearly
-      console.log('⏰ Adding 365 days');
-    }
-    else {
-      console.log('❌ Unknown priceId:', priceId);
-      return res.status(400).json({ error: 'Unknown product' });
-    }
-
-    const periodEnd = currentEnd + additionalSeconds;
-    console.log(`📅 Extending access: ${currentEnd} → ${periodEnd} (+${additionalSeconds}s)`);
-
-    await pool.query(
-      'UPDATE users SET subscription_status = "active", subscription_period_end = ? WHERE id = ?',
-      [periodEnd, userId]
-    );
-
-    console.log('✅ ACCESS EXTENDED → User ID:', userId);
+    // Activate subscription in DB
+    await pool.query('UPDATE users SET subscription_status = "active" WHERE id = ?', [userId]);
 
     const token = generateToken(userId);
     setAuthCookie(res, token);
@@ -352,17 +234,47 @@ app.get('/api/recover-session', async (req, res) => {
   }
 });
 
-// CANCEL
-app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
-  console.log('❌ CANCEL REQUEST → User ID:', req.userId);
-
+// PROFILE — SHOW ACTIVE / INACTIVE ONLY
+app.get('/api/me', requireAuth, async (req, res) => {
   try {
-    await pool.query(
-      'UPDATE users SET subscription_status = "inactive", subscription_period_end = 0 WHERE id = ?',
+    const [[user]] = await pool.query(
+      'SELECT username, email, subscription_status FROM users WHERE id = ?',
       [req.userId]
     );
 
-    console.log('✅ CANCEL SUCCESS');
+    // Optional: Sync with Stripe — if user has active sub in Stripe but not in DB, activate
+    if (user.subscription_status !== 'active' && user.stripe_customer_id) {
+      const subs = await stripe.subscriptions.list({ customer: user.stripe_customer_id, status: 'active' });
+      if (subs.data.length > 0) {
+        await pool.query('UPDATE users SET subscription_status = "active" WHERE id = ?', [req.userId]);
+        user.subscription_status = 'active';
+      }
+    }
+
+    res.json({
+      username: user.username,
+      email: user.email,
+      subscription_active: user.subscription_status === 'active'
+    });
+  } catch (err) {
+    console.error('Profile error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// CANCEL SUBSCRIPTION IN STRIPE + DB
+app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
+  try {
+    const [[user]] = await pool.query('SELECT stripe_customer_id FROM users WHERE id = ?', [req.userId]);
+
+    if (user.stripe_customer_id) {
+      const subs = await stripe.subscriptions.list({ customer: user.stripe_customer_id, status: 'active' });
+      for (const sub of subs.data) {
+        await stripe.subscriptions.update(sub.id, { cancel_at_period_end: true });
+      }
+    }
+
+    await pool.query('UPDATE users SET subscription_status = "inactive" WHERE id = ?', [req.userId]);
     res.json({ success: true });
   } catch (err) {
     console.error('Cancel error:', err);
@@ -370,49 +282,22 @@ app.post('/api/cancel-subscription-now', requireAuth, async (req, res) => {
   }
 });
 
-// LOGOUT
 app.post('/api/logout', (req, res) => {
-  res.clearCookie('auth_token', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    path: '/'
-  });
-  console.log('🚪 Logout – cookie cleared');
+  res.clearCookie('auth_token', { httpOnly: true, secure: true, sameSite: 'none', path: '/' });
   res.json({ success: true });
 });
 
-// ACCESS PREMIUM PAGE
 app.post('/api/access-premium', async (req, res) => {
   const { token } = req.body;
-
-  if (!token) {
-    return res.status(401).send(`
-      <h1>Login Required</h1>
-      <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login</a> first.</p>
-    `);
-  }
+  if (!token) return res.status(401).send('<h1>Login Required</h1><p><a href="/login.html">Login</a></p>');
 
   const payload = verifyToken(token);
-  if (!payload) {
-    return res.status(401).send(`
-      <h1>Session Expired</h1>
-      <p>Please <a href="https://techsport.app/streampaltest/public/login.html">login again</a>.</p>
-    `);
-  }
+  if (!payload) return res.status(401).send('<h1>Session Expired</h1><p><a href="/login.html">Login again</a></p>');
 
   try {
-    const [[user]] = await pool.query(
-      'SELECT subscription_status, subscription_period_end FROM users WHERE id = ?',
-      [payload.userId]
-    );
-
-    const now = Math.floor(Date.now() / 1000);
-    if (user.subscription_status !== 'active' || user.subscription_period_end <= now) {
-      return res.status(403).send(`
-        <h1>Subscription Required</h1>
-        <p><a href="https://techsport.app/streampaltest/public/profile.html">Subscribe here</a>.</p>
-      `);
+    const [[user]] = await pool.query('SELECT subscription_status FROM users WHERE id = ?', [payload.userId]);
+    if (user.subscription_status !== 'active') {
+      return res.status(403).send('<h1>Subscription Required</h1><p><a href="/profile.html">Subscribe</a></p>');
     }
 
     setAuthCookie(res, token);
@@ -423,12 +308,86 @@ app.post('/api/access-premium', async (req, res) => {
   }
 });
 
-// STATIC FALLBACK
+
+// ==================== STRIPE WEBHOOK ====================
+app.post('/api/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET; // Add this to your .env
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error('⚠️ Webhook signature verification failed.', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle relevant events
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        if (session.mode === 'subscription' && session.metadata?.userId) {
+          await pool.query('UPDATE users SET subscription_status = "active" WHERE id = ?', [session.metadata.userId]);
+          console.log('✅ Webhook: Activated subscription via checkout.session.completed');
+        }
+        break;
+      }
+      case 'invoice.paid': {
+        const invoice = event.data.object;
+        if (invoice.subscription && invoice.customer) {
+          // Find user by stripe_customer_id
+          const [[user]] = await pool.query('SELECT id FROM users WHERE stripe_customer_id = ?', [invoice.customer]);
+          if (user) {
+            await pool.query('UPDATE users SET subscription_status = "active" WHERE id = ?', [user.id]);
+            console.log('✅ Webhook: Kept active on renewal (invoice.paid)');
+          }
+        }
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const sub = event.data.object;
+        const [[user]] = await pool.query('SELECT id FROM users WHERE stripe_customer_id = ?', [sub.customer]);
+        if (user) {
+          await pool.query('UPDATE users SET subscription_status = "inactive" WHERE id = ?', [user.id]);
+          console.log('❌ Webhook: Deactivated subscription (deleted)');
+        }
+        break;
+      }
+      // Optional: handle payment failures
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object;
+        if (invoice.subscription && invoice.customer) {
+          const [[user]] = await pool.query('SELECT id FROM users WHERE stripe_customer_id = ?', [invoice.customer]);
+          if (user) {
+            await pool.query('UPDATE users SET subscription_status = "inactive" WHERE id = ?', [user.id]);
+            console.log('⚠️ Webhook: Marked inactive due to payment failure');
+          }
+        }
+        break;
+      }
+      default:
+        console.log(`Unhandled webhook event type: ${event.type}`);
+    }
+  } catch (err) {
+    console.error('Webhook handling error:', err);
+  }
+
+  res.json({ received: true });
+});
+
+
+
+
+
+
+
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('🚀 BACKEND LIVE on port', PORT);
+  console.log(`🚀 RECURRING SUBSCRIPTION BACKEND LIVE on port ${PORT}`);
 });
