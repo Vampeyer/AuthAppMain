@@ -14,6 +14,7 @@
     <a href="signup.html">Sign Up</a> |
     <a href="login.html">Login</a> |
     <a href="profile.html">Profile</a> |
+    <!-- RESTORED: Click triggers secure form POST -->
     <a href="#" onclick="openPremiumBackend(); return false;">Premium (Server)</a> |
     <a href="premium2.html">Premium (Client)</a>
   </nav>
@@ -71,9 +72,12 @@ async function loadProfile() {
       ` : `
         <h3>Choose Your Subscription:</h3>
         <div style="background:#f0f0f0;padding:20px;border-radius:8px;margin:20px 0;">
-          <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:#1565c0;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">Weekly</button>
-          <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">Monthly</button>
-          <button onclick="buy('price_1SXOVuFF2HALdyFk95SThAcM')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">Yearly</button>
+          <button onclick="buy('price_1SIBPkFF2HALdyFkogiGJG5w')" style="background:#1565c0;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+          Weekly $2.25</button>
+          <button onclick="buy('price_1SIBCzFF2HALdyFk7vOxByGq')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+            Monthly $7.75 </button>
+          <button onclick="buy('price_1SXOVuFF2HALdyFk95SThAcM')" style="background:#2e7d32;color:white;padding:16px 32px;border:none;border-radius:8px;margin:5px;font-size:16px;">
+            Yearly $75.00</button>
         </div>
       `}
 
@@ -127,8 +131,46 @@ async function logout() {
   location.href = 'login.html';
 }
 
+// RESTORED: Reliable method using form POST
 async function openPremiumBackend() {
-  // unchanged
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Please log in first');
+    window.location.href = 'login.html';
+    return;
+  }
+
+  // Quick check if subscription active
+  try {
+    const response = await fetch(`${BACKEND}/api/me`, { 
+      credentials: 'include',
+      headers: await getHeaders() 
+    });
+
+    if (!response.ok || !(await response.json()).subscription_active) {
+      alert('You need an active subscription to access premium content');
+      return;
+    }
+  } catch (e) {
+    alert('Session check failed');
+    return;
+  }
+
+  // Submit token via form to set cookie + redirect
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = `${BACKEND}/api/access-premium`;
+  form.target = '_blank';
+
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'token';
+  input.value = token;
+
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+  document.body.removeChild(form);
 }
 
 loadProfile();

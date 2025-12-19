@@ -121,7 +121,22 @@ app.post('/api/signup', async (req, res) => {
     const [[exists]] = await pool.query('SELECT 1 FROM users WHERE username = ? OR email = ?', [username, email]);
     if (exists) return res.status(400).json({ success: false, error: 'Taken' });
 
-    const phrase = generateMnemonic();
+   // const phrase = generateMnemonic(); - 12 word phrase 
+//    From the bip39 docs:
+//When called with no arguments, generateMnemonic() uses the default strength of 128 bits of entropy
+// No args → 128 bits → 12 words
+// generateMnemonic(256) → 24 words
+// generateMnemonic(160) → 15 words
+
+// === SHORT 2-WORD PHRASE ===
+    const wordlist = require('bip39').wordlists.english;
+    const word1 = wordlist[Math.floor(Math.random() * wordlist.length)];
+    //const word2 = wordlist[Math.floor(Math.random() * wordlist.length)];
+    const phrase = `${word1}`;
+    // ===========================
+
+
+
     const hash = await bcrypt.hash(password, 10);
 
     const [result] = await pool.query(
