@@ -26,61 +26,65 @@
     <input type="email" id="email" placeholder="Email"><br><br>
     <input type="password" id="password" placeholder="Password"><br><br>
     <button onclick="signup()">Sign Up</button>
-    <p id="phrase" style="display:none"></p>>Your new 2-word recovery phrase (write it down!):</p>
+    <!--   -->
+    <p id="phrase" style="display:none"></p>>Your new  recovery key (write it down!):</p>
 <h3 style="word-break:break-all; background:#f0f0f0; padding:10px;">{{phrase}}</h3>
 <p>You will need both words exactly to log in.</p>
   </div>
 
 <script>
 const BACKEND_URL = 'https://authappmain.onrender.com';
-
 async function signup() {
-  const data = {
-    username: document.getElementById('username').value.trim(),
-    email: document.getElementById('email').value.trim(),
-    password: document.getElementById('password').value
-  };
+  const username = document.getElementById('username').value.trim();
+  const email = document.getElementById('email').value.trim().toLowerCase();
+  const password = document.getElementById('password').value;
+
+  // Client-side checks
+  if (!username || username.length < 3 || username.length > 20) {
+    return alert('Username must be 3–20 characters');
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return alert('Username: only letters, numbers, _, - allowed');
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return alert('Enter a valid email');
+  }
+  if (password.length < 8) {
+    return alert('Password must be at least 8 characters');
+  }
+  if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+    return alert('Password needs uppercase, lowercase, and a number');
+  }
+
+  const data = { username, email, password };
 
   try {
     const res = await fetch(`${BACKEND_URL}/api/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
-  });
+    });
 
     const json = await res.json();
     if (json.success) {
-      localStorage.setItem('jwt', json.token);
-      document.getElementById('phrase').innerHTML = `Your recovery phrase: <strong>${json.phrase}</strong>. Save it!`;
+      localStorage.setItem('token', json.token);
+      document.getElementById('phrase').innerHTML = 
+        `Your recovery word: <strong style="font-size:1.4em;color:#d32f2f;">${json.phrase}</strong><br><br>
+         <em>Save this word exactly — you will need it to log in.</em>`;
       document.getElementById('phrase').style.display = 'block';
+
+      alert(`IMPORTANT!\n\nYour recovery word is:\n\n${json.phrase}\n\nWrite it down now.`);
       
-// 2. Use alert() to ensure the user SEES the keyphrase immediately.
-      alert(`IMPORTANT: Your Recovery Phrase is: \n\n${json.phrase}\n\nCLICK OK, then CONFIRM you have saved it.`);
-
-
-
-      // 3. Use confirm() to get explicit user acknowledgement (returns true for OK)
-      const isConfirmed = confirm(`Have you securely saved your recovery phrase?
-      \n \t ${json.phrase} \n 
-      Press OK to continue to your profile.`);
-      
-      if (isConfirmed) { 
-        setTimeout(()=>{ 
-     location.href = 'profile.html'; 
-         } , 30000) // 15 seconds to redirect
-   
-      } else { 
-        // User pressed 'Cancel' on the confirmation box
-        alert("Please make sure you save your key phrase before proceeding."); 
+      const confirmed = confirm(`Did you save your recovery word: ${json.phrase} ?`);
+      if (confirmed) {
+        location.href = 'profile.html';
       }
     } else {
-      alert(json.error);
+      alert(json.error || 'Signup failed');
     }
   } catch (e) {
     alert('Server error');
   }
-
-
 }
 
 function loadProtected(path) {

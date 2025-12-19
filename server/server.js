@@ -104,7 +104,8 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
     const [[user]] = await pool.query('SELECT subscription_status FROM users WHERE id = ?', [req.userId]);
     if (user.subscription_status !== 'active') {
       if (req.accepts('html')) {
-        return res.status(403).send('<h1>Subscription Required</h1><p><a href="/profile.html">Subscribe</a></p>');
+        setTimeout(() => { window.location.href = "" } , 3000)
+        return res.status(403).send('<h1>Subscription Required</h1><p><a href="https://techsport.app/streampaltest/public/index.html">Subscribe</a></p>');
       }
       return res.status(403).json({ error: 'Active subscription required' });
     }
@@ -115,11 +116,9 @@ app.use('/subscriptions', requireAuth, async (req, res, next) => {
   }
 }, express.static(path.join(__dirname, 'subscriptions')));
 
-app.post('/api/signup', async (req, res) => {
-  const { username, email, password } = req.body;
-  try {
-    const [[exists]] = await pool.query('SELECT 1 FROM users WHERE username = ? OR email = ?', [username, email]);
-    if (exists) return res.status(400).json({ success: false, error: 'Taken' });
+
+//SUBSCRIPTIONS
+// Currently set too 1 key phrase using bip39()
 
    // const phrase = generateMnemonic(); - 12 word phrase 
 //    From the bip39 docs:
@@ -129,15 +128,54 @@ app.post('/api/signup', async (req, res) => {
 // generateMnemonic(160) → 15 words
 
 // === SHORT 2-WORD PHRASE ===
-    const wordlist = require('bip39').wordlists.english;
-    const word1 = wordlist[Math.floor(Math.random() * wordlist.length)];
+  //  const wordlist = require('bip39').wordlists.english;
+  //  const word1 = wordlist[Math.floor(Math.random() * wordlist.length)];
     //const word2 = wordlist[Math.floor(Math.random() * wordlist.length)];
-    const phrase = `${word1}`;
+   // const phrase = `${word1}`;
     // ===========================
+    app.post('/api/signup', async (req, res) => {
+  let { username, email, password } = req.body;
 
+  // === SANITIZATION  & SQL INjection Prevention===
+  username = (username || '').trim();
+  email = (email || '').trim().toLowerCase();
+  password = (password || '').trim();
 
+  // === VALIDATION ===
+  if (!username || username.length < 3 || username.length > 20) {
+    return res.status(400).json({ success: false, error: 'Username must be 3–20 characters' });
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return res.status(400).json({ success: false, error: 'Username: only letters, numbers, _, - allowed' });
+  }
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, error: 'Valid email required' });
+  }
+
+  if (!password || password.length < 8) {
+    return res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+  }
+  if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+    return res.status(400).json({ success: false, error: 'Password needs uppercase, lowercase, and number' });
+  }
+
+  try {
+    const [[exists]] = await pool.query(
+      'SELECT 1 FROM users WHERE username = ? OR email = ?',
+      [username, email]
+    );
+    if (exists) {
+      return res.status(400).json({ success: false, error: 'Username or email already taken' });
+    }
 
     const hash = await bcrypt.hash(password, 10);
+
+    // === 1-WORD PHRASE (your current setup) ===
+    const wordlist = require('bip39').wordlists.english;
+    const word1 = wordlist[Math.floor(Math.random() * wordlist.length)];
+    const phrase = word1; // single word as you have now
+    // ========================================
 
     const [result] = await pool.query(
       'INSERT INTO users (username, email, password_hash, phrase, subscription_status) VALUES (?, ?, ?, ?, "inactive")',
@@ -147,10 +185,11 @@ app.post('/api/signup', async (req, res) => {
     const token = generateToken(result.insertId);
     setAuthCookie(res, token);
 
+    console.log('✅ NEW USER → ID:', result.insertId, 'Username:', username, 'Phrase:', phrase);
     res.json({ success: true, phrase, token });
   } catch (err) {
     console.error('BACK: Signup error:', err);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
