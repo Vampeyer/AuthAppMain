@@ -1,0 +1,15 @@
+{
+  "movies": [
+    {"id": 299536, "title": "Avengers: Infinity War"},
+    {"id": 299534, "title": "Avengers: Endgame"},
+    {"id": 155, "title": "The Dark Knight"}
+  ],
+  "series": [
+        {"id": 60625, "title": "Rick and Morty"},
+    {"id": 1399, "title": "Game of Thrones"},
+    {"id": 1396, "title": "Breaking Bad"},
+    {"id": 66732, "title": "Stranger Things"},
+    {"id": 60735, "title": "The Flash"}
+
+  ]
+}

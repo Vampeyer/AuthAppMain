@@ -1,6 +1,9 @@
 
 
 
+
+____________________________________________________________________
+
 Subscription pages are done via 2 methods . 
 _____________________________________________
 
@@ -15,4 +18,4 @@ _____________________________________________
 
 
 #2 - The folder , server/subscriptions/
-    contains HTML and 
+    contains HTML and is used for the premium subscription

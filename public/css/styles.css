@@ -1,4 +1,7 @@
-* {
+
+
+
+  * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -11,22 +14,34 @@ body {
 }
 
 nav {
-    background: #1e293b;
-    padding: 1.2rem;
+    background: #663adf;
+    padding: .8rem;
+    margin: .3px;
     text-align: center;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+@media (min-width : 600px) {
+  nav {
+   font-size: 1.5rem;
+}
+}
+
 nav a {
     color: white;
-    margin: 0 20px;
+    margin: 0 10px;
     text-decoration: none;
-    font-weight: 600;
-    font-size: 1.1rem;
+    font-weight: 500;
+
+    padding: 5px;
+    border: solid rgba(199, 253, 38, 0.829) 3px;
+    border-radius: 15%;
 }
 
 nav a:hover {
     text-decoration: underline;
+    color: black;
+    background-color: rgba(255, 255, 255, 0.829);
 }
 
 .container {
@@ -94,6 +109,6 @@ button {
     padding: 20px;
     border-radius: 8px;
     font-size: 1.3rem;
-    word-spacing: 10px;
+    word-spacing: px;
     margin: 20px 0;
 }
